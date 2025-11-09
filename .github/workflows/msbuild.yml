@@ -1,0 +1,23 @@
+name: msbuild
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Bootstrap vcpkg
+        uses: lukka/run-vcpkg@v11
+        with:
+          vcpkgGitCommitId: 'latest'
+          vcpkgDirectory: '${{ runner.workspace }}/vcpkg'
+          runVcpkgInstall: true
+          vcpkgJsonGlob: 'vcpkg.json'
+      - name: Add MSBuild to PATH
+        uses: microsoft/setup-msbuild@v2
+      - name: Restore & Build
+        run: |
+          msbuild img-compressor.sln /m /p:Configuration=Release /p:Platform=x64 /v:m

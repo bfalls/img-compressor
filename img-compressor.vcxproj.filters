@@ -1,0 +1,51 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <Filter Include="include">
+      <UniqueIdentifier>{0f2c61ae-bf11-4809-b135-db9dfce9e52c}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="src">
+      <UniqueIdentifier>{eae19ab9-3e1d-4eb4-85f4-382c3ffd8b65}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="data">
+      <UniqueIdentifier>{82632f0c-8cef-45dc-85c3-fe8744fcb9f0}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="third_party">
+      <UniqueIdentifier>{ad419ec8-c98e-47e1-a6ad-1e411fce0c94}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="include\compressor.hpp">
+      <Filter>include</Filter>
+    </ClInclude>
+    <ClInclude Include="third_party\stb_image.h">
+      <Filter>third_party</Filter>
+    </ClInclude>
+    <ClInclude Include="include\jpeg_scanline_writer.hpp">
+      <Filter>include</Filter>
+    </ClInclude>
+  </ItemGroup>
+  <ItemGroup>
+    <CudaCompile Include="src\main.cu">
+      <Filter>src</Filter>
+    </CudaCompile>
+    <CudaCompile Include="src\compressor_gpu.cu">
+      <Filter>src</Filter>
+    </CudaCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="src\compressor_cpu.cpp">
+      <Filter>src</Filter>
+    </ClCompile>
+    <ClCompile Include="src\jpeg_scanline_writer.cpp" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="scripts\zip.ps1" />
+    <None Include="vcpkg.json" />
+    <None Include="vcpkg-configuration.json" />
+    <None Include=".gitignore" />
+    <None Include=".gitattributes" />
+    <None Include=".github\workflows\msbuild.yml" />
+    <None Include="README.md" />
+  </ItemGroup>
+</Project>

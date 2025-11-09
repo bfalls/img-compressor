@@ -1,0 +1,48 @@
+# VS user / build
+.suo
+*.user
+*.userosscache
+*.sln.docstates
+.vs/
+x64/
+Debug/
+Release/
+*.VC.db
+*.VC.VC.opendb
+*.ipch
+
+# CUDA intermediates
+*.cudafe1.cpp
+*.cudafe1.gpu
+*.cubin
+*.fatbin
+*.ptx
+*.cuh.hash
+*.module_id
+
+# Build logs & obj
+*.obj
+*.pch
+*.pdb
+*.idb
+*.ilk
+*.log
+*.tlog
+*.lastbuildstate
+
+# Packages / archives
+*.zip
+*.7z
+
+# Local artifacts
+artifacts/
+build/
+out/
+img-compressor.xml
+
+# vcpkg local install tree (kept inside repo if MSBuild manifest mode is on)
+vcpkg_installed/
+
+# Keep artifacts folder but ignore generated outputs
+/tests/artifacts/*
+!/tests/artifacts/.gitkeep

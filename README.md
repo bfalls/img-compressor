@@ -49,7 +49,7 @@ with optional CPU comparison for benchmarking and verification.
 6. A sample image is included under tests\data\img-test.png.
    Run the compressor from the project root after building:
    ```bash
-   img-compressor --input tests/data/img-test.png --output tests/artifacts/out.jpg --quality 85 --compare
+    .\x64\Debug\img-compressor.exe --input tests/data/img-test.png --output tests/artifacts/out.jpg --quality 85 --compare
    ```
 
    If you don't have a GPU it will just use the CPU path.

@@ -6,12 +6,28 @@
 #include <chrono>
 #include <stdexcept>
 
+/*
+stb_image is used for image decoding to keep the project self-contained.
+Decoding happens on the CPU to simplify the pipeline — GPU work is reserved
+exclusively for the compression stage. Code can run on systems without 
+a CUDA device.
+*/
 #define STB_IMAGE_IMPLEMENTATION
 #include "../third_party/stb_image.h"
 
 #include "compressor.hpp"
 #include "jpeg_scanline_writer.hpp"
 
+/*
+Converts RGB interleaved pixels into planar format.
+Performing this conversion once up front simplifies all downstream processing.
+The compression pipeline expects planar data because:
+
+ - GPU kernels achieve coalesced memory access when reading one channel at a time.
+ - The CPU path benefits from better cache locality by processing contiguous planes.
+ - The format aligns with JPEG’s natural separation of color components (luma/chroma),
+   reducing complexity when comparing or validating output across implementations.
+*/
 static void split_rgb_planar(const unsigned char* rgb, int w, int h, ImageRGB& img) {
 	img.width = w; img.height = h;
 	img.r.resize((size_t)w * h); img.g.resize((size_t)w * h); img.b.resize((size_t)w * h);
@@ -48,7 +64,10 @@ static bool has_cuda_device()
 		return false;
 	return true;
 }
-
+/*
+Decode once on CPU, compress on GPU (if available) and/or CPU.
+Compare GPU vs CPU output if requested.
+*/
 int main(int argc, char** argv) {
 	std::string in_path, out_path;
 	int quality = 90;
@@ -66,10 +85,15 @@ int main(int argc, char** argv) {
 	if (quality < 1) quality = 1;
 	if (quality > 100) quality = 100;
 
+	// Load input image on CPU (stb_image handles PNG, JPEG, etc.)
 	int w = 0, h = 0, c = 0;
 	unsigned char* rgb = stbi_load(in_path.c_str(), &w, &h, &c, 3);
 	if (!rgb) { std::fprintf(stderr, "Failed to load %s\n", in_path.c_str()); return 1; }
 
+	/*
+	The decoded buffer is converted once into planar format for both
+	CPU and GPU paths.
+	*/
 	ImageRGB img;
 	split_rgb_planar(rgb, w, h, img);
 
@@ -79,6 +103,8 @@ int main(int argc, char** argv) {
 		if (gpu_ok) {
 			const std::string out_gpu_path = with_suffix_before_ext(out_path, "-gpu");
 			auto t0 = std::chrono::high_resolution_clock::now();
+
+			// initialize compressor (e.g. quantization tables, constants, device buffers) for given quality
 			init_compressor(quality);
 
 			ImageRGB out_gpu;

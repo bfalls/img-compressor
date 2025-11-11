@@ -3,9 +3,11 @@
 #include <cmath>
 #include <vector>
 
-// ------------------------------
-// IJG base quantization matrices
-// ------------------------------
+/*
+Quant tables are fixed to the IJG (libjpeg) baselines so quality scaling
+behaves like familiar JPEG encoders. Sticking to the canonical values makes
+the output comparable across implementations and keeps tuning predictable.
+*/
 const uint8_t kBaseQ_Luma[64] = {
   16,11,10,16,24,40,51,61,
   12,12,14,19,26,58,60,55,
@@ -65,9 +67,6 @@ void make_scaled_quant_tables(int quality,
 	}
 }
 
-// ------------------------------
-// CPU reference (unchanged API)
-// ------------------------------
 namespace {
 
 	inline uint8_t clamp_u8_cpu(float v) {
@@ -76,6 +75,12 @@ namespace {
 		return static_cast<uint8_t>(v + 0.5f);
 	}
 
+	/*
+	Using the analytical DCT-II basis makes CPU and GPU paths comparable
+	and keeps quality changes traceable to quantization rather than 
+	transform differences. Precomputing 
+	T and T^T once per call avoids clutter in the inner loops.
+	*/
 	void build_dct_mats_cpu(float T[64], float Tt[64]) {
 		constexpr double PI = 3.14159265358979323846;
 		const float invSqrt8 = 1.0f / std::sqrt(8.0f);
@@ -91,6 +96,13 @@ namespace {
 
 	inline int idx(int x, int y, int w) { return y * w + x; }
 
+	/*
+	Per-channel function matches the GPU structure closely. Blocked 8x8
+	forward DCT, in-place quant/dequant, inverse DCT, with clamped edges for
+	partial tiles. The goal is not ultimate CPU performance but a readable,
+	deterministic reference that is easy to compare against device output and
+	simple to instrument for accuracy checks.
+	*/
 	void compress_channel_cpu(const uint8_t* src, uint8_t* dst, int width, int height, const uint8_t qtbl[64]) {
 		float T[64], Tt[64];
 		build_dct_mats_cpu(T, Tt);
@@ -169,9 +181,7 @@ void compress_image_rgb_cpu(const ImageRGB& in, ImageRGB& out, int quality) {
 	compress_channel_cpu(in.b.data(), out.b.data(), in.width, in.height, qL);
 }
 
-// ------------------------------
 // Metrics
-// ------------------------------
 double mse_plane(const std::vector<uint8_t>& a, const std::vector<uint8_t>& b) {
 	if (a.size() != b.size()) throw std::runtime_error("mse_plane: size mismatch");
 	if (a.empty()) return 0.0;

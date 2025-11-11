@@ -3,19 +3,21 @@
 #include <cmath>
 #include "compressor.hpp"
 
-// ------------------------------------------------------------
-// Device constants
-// ------------------------------------------------------------
+/*
+Device-resident state is kept in constant memory because the DCT basis and
+quant tables are tiny, immutable during a run, and broadcast to all threads.
+Constant memory delivers good cache behavior for these 8x8 kernels.
+*/
 __constant__ uint8_t d_qLuma[64];
 __constant__ float   d_T[64];   // DCT matrix [u,x] (row-major)
 __constant__ float   d_Tt[64];  // transpose [x,u]
 
-//static int  g_quality = 90;
 static bool g_inited = false;
 
-// ------------------------------------------------------------
-// Helpers
-// ------------------------------------------------------------
+/*
+Rounding and saturating to 8-bit here mirrors JPEG’s final clamping behavior
+and prevents device/host drift from float-to-int conversions.
+*/
 __device__ __forceinline__ uint8_t clamp_u8(float v) {
 	v = fminf(255.f, fmaxf(0.f, v));
 	return static_cast<uint8_t>(v + 0.5f);
@@ -34,25 +36,38 @@ static void build_dct_mats(float T[64], float Tt[64]) {
 	}
 }
 
-// ------------------------------------------------------------
-// Kernel: 8x8 DCT -> quant/dequant -> IDCT
-// Notes:
-//  - Clamped edge loads (so partial tiles are defined)
-//  - Bounds-checked stores
-//  - Two correctness fixes:
-//      * Forward col DCT uses T[v,x]  (d_T[tx*8 + k])   <-- FIXED HERE
-//      * Row IDCT uses   T^T[y,k]    (d_Tt[ty*8 + k])  <-- FIXED BEFORE
-// ------------------------------------------------------------
+/*
+Kernel: 8x8 DCT -> quant/dequant -> IDCT
+
+Tile size matches JPEG’s natural block size. Padding shared-memory rows by
++1 mitigates bank conflicts on older architectures. Edges are handled by
+clamped loads instead of divergence-heavy conditionals so partial tiles
+remain defined without branching.
+
+The quantize/dequantize step sits between forward and inverse transforms to
+emulate JPEG’s energy shaping. Dequantizing in-kernel ensures the output
+is directly comparable as pixels, without requiring a separate pass.
+
+Two fragile indexing points are explicitly documented:
+- Column DCT uses T[v,k] (not T^T), which is easy to misindex when
+  reusing the row routine.
+- Row IDCT uses T^T[y,k], keeping the inverse transform consistent with
+  the precomputed transpose.
+
+The kernel is intentionally side-effect free: all parameters
+are passed in, and temporary storage stays in shared memory. Kernel is
+predictable under profiling and simplifies future tiling work.
+*/
 __global__ void k_dct8x8_quant_idct(const uint8_t* __restrict__ src,
 	uint8_t* __restrict__ dst,
 	int width, int height, int pitch)
 {
 	const int bx = blockIdx.x * 8;
 	const int by = blockIdx.y * 8;
-	const int tx = threadIdx.x;   // 0..7  -> x/column index
-	const int ty = threadIdx.y;   // 0..7  -> y/row (or u in freq domain)
+	const int tx = threadIdx.x; // 0..7  -> x/column index
+	const int ty = threadIdx.y; // 0..7  -> y/row (or u in freq domain)
 
-	__shared__ float s_in[8][9];   // +1 padding to avoid SMEM bank conflicts
+	__shared__ float s_in[8][9]; // +1 padding to avoid SMEM bank conflicts
 	__shared__ float s_tmp[8][9];
 	__shared__ float s_out[8][9];
 
@@ -83,7 +98,12 @@ __global__ void k_dct8x8_quant_idct(const uint8_t* __restrict__ src,
 	s_out[ty][tx] = sum;
 	__syncthreads();
 
-	// ---- Quantize / dequantize (JPEG-like) ----
+	/*
+	Quantization is applied and immediately inverted to simulate JPEG’s
+	coefficient coarsening without introducing a bitstream. This preserves
+	the ability to compare pixel output directly while still exercising the
+	quality setting and energy compaction trade-offs.
+	*/
 	const int qidx = ty * 8 + tx;
 	const float coeff = s_out[ty][tx];
 	const int   q = __float2int_rn(coeff / (float)d_qLuma[qidx]);
@@ -115,13 +135,15 @@ __global__ void k_dct8x8_quant_idct(const uint8_t* __restrict__ src,
 	}
 }
 
-// ------------------------------------------------------------
 // Public API
-// ------------------------------------------------------------
+
+/*
+Initialization concentrates all quality-dependent setup (quant tables) and
+static math (DCT bases) into a single call. Uploading once into constant
+memory avoids repeated PCIe traffic.
+*/
 void init_compressor(int quality)
 {
-	//g_quality = quality;
-
 	// 1) Upload scaled quant tables (host code sets DC step to 1)
 	uint8_t qL[64], qC_unused[64];
 	make_scaled_quant_tables(quality, qL, qC_unused);
@@ -136,6 +158,12 @@ void init_compressor(int quality)
 	g_inited = true;
 }
 
+/*
+Per-channel entry point exists so callers can mix-and-match scheduling,
+benchmark just luma, or wire this into more elaborate pipelines (e.g., chroma
+subsampling) without changing the kernel. The grid maps 1:1 onto 8x8 tiles,
+which keeps the math simple.
+*/
 void compress_channel_gpu(const uint8_t* src, uint8_t* dst, int width, int height)
 {
 	if (!g_inited) init_compressor(90);
@@ -148,6 +176,15 @@ void compress_channel_gpu(const uint8_t* src, uint8_t* dst, int width, int heigh
 	CUDA_CHECK(cudaGetLastError());
 }
 
+/*
+RGB wrapper keeps ownership and sizing responsibilities explicit. The
+outputs must be pre-sized to the input dimensions. Avoids hidden 
+reallocations in perf-sensitive paths and makes buffer lifetimes
+obvious to callers.
+
+Each channel is transferred independently to align with the planar layout and
+to keep the kernel interface minimal.
+*/
 void compress_image_rgb_gpu(const ImageRGB& in, ImageRGB& out)
 {
 	if (out.width != in.width || out.height != in.height ||

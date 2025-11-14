@@ -131,7 +131,7 @@ namespace {
 				for (int u = 0; u < 8; ++u)
 					for (int v = 0; v < 8; ++v) {
 						float s = 0.f;
-						for (int k = 0; k < 8; ++k) s += tmp[u][k] * Tt[v * 8 + k];
+						for (int k = 0; k < 8; ++k) s += tmp[u][k] * T[v * 8 + k];
 						coeff[u][v] = s;
 					}
 
@@ -155,7 +155,7 @@ namespace {
 				for (int y8 = 0; y8 < 8; ++y8)
 					for (int x8 = 0; x8 < 8; ++x8) {
 						float s = 0.f;
-						for (int k = 0; k < 8; ++k) s += Tt[k * 8 + y8] * tmp2[k][x8];
+						for (int k = 0; k < 8; ++k) s += Tt[y8 * 8 + k] * tmp2[k][x8];
 						int x = bx + x8, y = by + y8;
 						if (x < width && y < height)
 							dst[idx(x, y, width)] = clamp_u8_cpu(s + 128.0f);

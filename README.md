@@ -34,9 +34,9 @@ with optional CPU comparison for benchmarking and verification.
    ```
 
 2. Make sure you have vcpkg installed and integrated with Visual Studio:
-  ```bash
-  C:\vcpkg\vcpkg integrate install
-  ```
+    ```bash
+    C:\vcpkg\vcpkg integrate install
+    ```
 
 3. Open img-compressor.sln in Visual Studio.
 
@@ -48,9 +48,18 @@ with optional CPU comparison for benchmarking and verification.
 
 6. A sample image is included under tests\data\img-test.png.
    Run the compressor from the project root after building:
-   ```bash
-    .\x64\Debug\img-compressor.exe --input tests/data/img-test.png --output tests/artifacts/out.jpg --quality 85 --compare
+   ```powershell
+    .\x64\Debug\img-compressor.exe --input tests\data\img-test.png --output tests\artifacts\out.jpg --quality 85 --compare
    ```
 
    If you don't have a GPU it will just use the CPU path.
+   See the timings comparison and don't forget to view the images.
+   Try different quality settings!
+
+   ```shell
+   [GPU] wrote .\tests\artifacts\out-gpu.jpg in 19.855 ms
+   [CPU] wrote .\tests\artifacts\out-cpu.jpg in 402.399 ms
+   ```
+
+   [![Hits](https://hits.sh/github.com/bfalls/img-compressor.svg?style=plastic)](https://hits.sh/github.com/bfalls/img-compressor/)
 

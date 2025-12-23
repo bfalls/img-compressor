@@ -12,6 +12,7 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="include\compressor.hpp" />
+    <ClInclude Include="include\saliency.hpp" />
     <ClInclude Include="include\jpeg_scanline_writer.hpp" />
     <ClInclude Include="third_party\stb_image.h" />
   </ItemGroup>
@@ -21,6 +22,7 @@
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="src\compressor_cpu.cpp" />
+    <ClCompile Include="src\saliency.cpp" />
     <ClCompile Include="src\jpeg_scanline_writer.cpp" />
   </ItemGroup>
   <ItemGroup>

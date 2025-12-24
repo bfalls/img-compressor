@@ -1,4 +1,5 @@
 #include "compressor.hpp"
+#include "saliency.hpp"
 #include <algorithm>
 #include <cmath>
 #include <vector>
@@ -31,6 +32,10 @@ const uint8_t kBaseQ_Chroma[64] = {
 };
 
 static inline int clampi(int v, int lo, int hi) {
+	return v < lo ? lo : (v > hi ? hi : v);
+}
+
+static inline float clampf(float v, float lo, float hi) {
 	return v < lo ? lo : (v > hi ? hi : v);
 }
 
@@ -103,13 +108,20 @@ namespace {
 	deterministic reference that is easy to compare against device output and
 	simple to instrument for accuracy checks.
 	*/
-	void compress_channel_cpu(const uint8_t* src, uint8_t* dst, int width, int height, const uint8_t qtbl[64]) {
+	void compress_channel_cpu(const uint8_t* src, uint8_t* dst, int width, int height,
+		const uint8_t qtbl[64], const std::vector<float>* inv_block_scales, int blocks_x) {
 		float T[64], Tt[64];
 		build_dct_mats_cpu(T, Tt);
 
 		for (int by = 0; by < height; by += 8) {
 			for (int bx = 0; bx < width; bx += 8) {
 				float block[8][8], tmp[8][8], coeff[8][8], tmp2[8][8];
+				float block_scale = 1.0f;
+				if (inv_block_scales && !inv_block_scales->empty()) {
+					const int bidx = (by / 8) * blocks_x + (bx / 8);
+					if (bidx >= 0 && bidx < (int)inv_block_scales->size())
+						block_scale = (*inv_block_scales)[bidx];
+				}
 
 				// load/center (clamped)
 				for (int ty = 0; ty < 8; ++ty) {
@@ -134,6 +146,15 @@ namespace {
 						for (int k = 0; k < 8; ++k) s += tmp[u][k] * T[v * 8 + k];
 						coeff[u][v] = s;
 					}
+
+				// Apply per-block coefficient scaling before quantization.
+				// Scaling coefficients (instead of per-block quant tables) keeps the
+				// bitstream standards-compliant while biasing energy allocation.
+				if (block_scale != 1.0f) {
+					for (int u = 0; u < 8; ++u)
+						for (int v = 0; v < 8; ++v)
+							coeff[u][v] *= block_scale;
+				}
 
 				// quant/dequant (DC untouched because qtbl[0]==1)
 				for (int u = 0; u < 8; ++u)
@@ -174,14 +195,66 @@ void compress_image_rgb_cpu(const ImageRGB& in, ImageRGB& out, int quality,
 		(int)out.b.size() != in.width * in.height)
 		throw std::runtime_error("compress_image_rgb_cpu: 'out' mis-sized.");
 
-	(void)quality_map; // quality map applied in later steps (plumbing placeholder)
+	int blocks_x = 0;
+	std::vector<float> inv_scales_main;
+	std::vector<float> inv_scales_chroma;
+
+	auto compute_block_scales = [&](const ImageRGB& img) {
+		blocks_x = (img.width + 7) / 8;
+		if (!quality_map.enabled)
+			return;
+
+		SaliencyParams saliency_params;
+		QualityMapDebugConfig debug_cfg;
+		const QualityMapDebugConfig* debug_ptr = nullptr;
+		if (!quality_map.debug_output_path.empty()) {
+			debug_cfg.output_path = quality_map.debug_output_path;
+			debug_ptr = &debug_cfg;
+		}
+
+		const BlockImportanceMap importance = compute_block_importance(img, saliency_params, debug_ptr);
+		if (importance.values.empty())
+			return;
+
+		blocks_x = importance.blocks_x;
+		const int blocks_y = importance.blocks_y;
+		const size_t count = importance.values.size();
+		inv_scales_main.resize(count);
+		inv_scales_chroma.resize(count);
+
+		float min_scale = quality_map.min_scale;
+		float max_scale = quality_map.max_scale;
+		if (min_scale > max_scale)
+			std::swap(min_scale, max_scale);
+		const float strength = clampf(quality_map.strength, 0.0f, 1.0f);
+		const float min_allowed = 1e-6f;
+		min_scale = std::max(min_scale, min_allowed);
+		max_scale = std::max(max_scale, min_scale);
+
+		for (int by = 0; by < blocks_y; ++by) {
+			for (int bx = 0; bx < blocks_x; ++bx) {
+				const size_t idx = (size_t)by * blocks_x + bx;
+				const float s = clampf(importance.values[idx], 0.0f, 1.0f);
+				const float base = max_scale + (min_scale - max_scale) * s; // lerp(max_scale, min_scale, s)
+				const float mixed = 1.0f + (base - 1.0f) * strength;
+				const float m = clampf(mixed, min_scale, max_scale);
+				const float inv = 1.0f / std::max(m, min_allowed);
+				inv_scales_main[idx] = inv;
+				inv_scales_chroma[idx] = 1.0f + (inv - 1.0f) * 0.5f; // milder effect for chroma
+			}
+		}
+	};
+
+	compute_block_scales(in);
 
 	uint8_t qL[64], qC_unused[64];
 	make_scaled_quant_tables(quality, qL, qC_unused);
 
-	compress_channel_cpu(in.r.data(), out.r.data(), in.width, in.height, qL);
-	compress_channel_cpu(in.g.data(), out.g.data(), in.width, in.height, qL);
-	compress_channel_cpu(in.b.data(), out.b.data(), in.width, in.height, qL);
+	const std::vector<float>* map_main = inv_scales_main.empty() ? nullptr : &inv_scales_main;
+	const std::vector<float>* map_chroma = inv_scales_chroma.empty() ? nullptr : &inv_scales_chroma;
+	compress_channel_cpu(in.r.data(), out.r.data(), in.width, in.height, qL, map_main, blocks_x);
+	compress_channel_cpu(in.g.data(), out.g.data(), in.width, in.height, qL, map_chroma, blocks_x);
+	compress_channel_cpu(in.b.data(), out.b.data(), in.width, in.height, qL, map_chroma, blocks_x);
 }
 
 // Metrics

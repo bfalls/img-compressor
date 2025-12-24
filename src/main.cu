@@ -83,9 +83,9 @@ int main(int argc, char** argv) {
 		else if (a == "--quality" && i + 1 < argc) quality = std::atoi(argv[++i]);
 		else if (a == "--compare") do_compare = true;
 		else if (a == "--quality-map") quality_map.enabled = true;
-		else if (a == "--quality-map-strength" && i + 1 < argc) quality_map.strength = std::atof(argv[++i]);
-		else if (a == "--quality-map-min-scale" && i + 1 < argc) quality_map.min_scale = std::atof(argv[++i]);
-		else if (a == "--quality-map-max-scale" && i + 1 < argc) quality_map.max_scale = std::atof(argv[++i]);
+		else if (a == "--quality-map-strength" && i + 1 < argc) quality_map.strength = std::strtof(argv[++i], nullptr);
+		else if (a == "--quality-map-min-scale" && i + 1 < argc) quality_map.min_scale = std::strtof(argv[++i], nullptr);
+		else if (a == "--quality-map-max-scale" && i + 1 < argc) quality_map.max_scale = std::strtof(argv[++i], nullptr);
 		else if (a == "--quality-map-debug" && i + 1 < argc) quality_map.debug_output_path = argv[++i];
 		else { usage(); return 1; }
 	}

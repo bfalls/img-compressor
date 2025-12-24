@@ -8,7 +8,7 @@
 
 /*
 stb_image is used for image decoding to keep the project self-contained.
-Decoding happens on the CPU to simplify the pipeline — GPU work is reserved
+Decoding happens on the CPU to simplify the pipeline - GPU work is reserved
 exclusively for the compression stage. Code can run on systems without 
 a CUDA device.
 */
@@ -25,7 +25,7 @@ The compression pipeline expects planar data because:
 
  - GPU kernels achieve coalesced memory access when reading one channel at a time.
  - The CPU path benefits from better cache locality by processing contiguous planes.
- - The format aligns with JPEG’s natural separation of color components (luma/chroma),
+ - The format aligns with JPEG's natural separation of color components (luma/chroma),
    reducing complexity when comparing or validating output across implementations.
 */
 static void split_rgb_planar(const unsigned char* rgb, int w, int h, ImageRGB& img) {
@@ -39,7 +39,9 @@ static void split_rgb_planar(const unsigned char* rgb, int w, int h, ImageRGB& i
 static void usage() {
 	std::fprintf(stderr,
 		"Usage: img-compressor --input <in.(png|jpg)> --output <out.jpg> "
-		"[--quality Q] [--compare]\n"
+		"[--quality Q] [--compare] [--quality-map] [--quality-map-strength S]\n"
+		"                 [--quality-map-min-scale M] [--quality-map-max-scale M]\n"
+		"                 [--quality-map-debug <dir>]\n"
 		"  Default backend: GPU coefficients -> JPEG (4:2:0)\n"
 		"  --legacy : use previous GPU pixel path + stb writer\n");
 }
@@ -59,7 +61,7 @@ static bool has_cuda_device()
 	cudaError_t e = cudaGetDeviceCount(&count);
 	if (e != cudaSuccess || count <= 0)
 		return false;
-	// also try selecting device 0 to ensure it’s usable
+	// also try selecting device 0 to ensure it's usable
 	if (cudaSetDevice(0) != cudaSuccess)
 		return false;
 	return true;
@@ -72,6 +74,7 @@ int main(int argc, char** argv) {
 	std::string in_path, out_path;
 	int quality = 90;
 	bool do_compare = false;
+	QualityMapConfig quality_map;
 
 	for (int i = 1; i < argc; ++i) {
 		std::string a = argv[i];
@@ -79,6 +82,11 @@ int main(int argc, char** argv) {
 		else if (a == "--output" && i + 1 < argc) out_path = argv[++i];
 		else if (a == "--quality" && i + 1 < argc) quality = std::atoi(argv[++i]);
 		else if (a == "--compare") do_compare = true;
+		else if (a == "--quality-map") quality_map.enabled = true;
+		else if (a == "--quality-map-strength" && i + 1 < argc) quality_map.strength = std::atof(argv[++i]);
+		else if (a == "--quality-map-min-scale" && i + 1 < argc) quality_map.min_scale = std::atof(argv[++i]);
+		else if (a == "--quality-map-max-scale" && i + 1 < argc) quality_map.max_scale = std::atof(argv[++i]);
+		else if (a == "--quality-map-debug" && i + 1 < argc) quality_map.debug_output_path = argv[++i];
 		else { usage(); return 1; }
 	}
 	if (in_path.empty() || out_path.empty()) { usage(); return 1; }
@@ -113,7 +121,7 @@ int main(int argc, char** argv) {
 			out_gpu.g.resize((size_t)w * h);
 			out_gpu.b.resize((size_t)w * h);
 
-			compress_image_rgb_gpu(img, out_gpu);  // CUDA pipeline to RGB
+			compress_image_rgb_gpu(img, out_gpu, quality_map);  // CUDA pipeline to RGB
 			CUDA_CHECK(cudaDeviceSynchronize());
 
 			jpeg_write_rgb_scanlines(out_gpu, out_gpu_path, quality);
@@ -131,7 +139,7 @@ int main(int argc, char** argv) {
 			out_cpu.g.resize((size_t)w * h);
 			out_cpu.b.resize((size_t)w * h);
 
-			compress_image_rgb_cpu(img, out_cpu, quality);
+			compress_image_rgb_cpu(img, out_cpu, quality, quality_map);
 			jpeg_write_rgb_scanlines(out_cpu, out_cpu_path, quality);
 			auto t1 = std::chrono::high_resolution_clock::now();
 			double ms_cpu = std::chrono::duration<double, std::milli>(t1 - t0).count();

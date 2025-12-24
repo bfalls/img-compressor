@@ -77,8 +77,8 @@ namespace {
 
 	/*
 	Using the analytical DCT-II basis makes CPU and GPU paths comparable
-	and keeps quality changes traceable to quantization rather than 
-	transform differences. Precomputing 
+	and keeps quality changes traceable to quantization rather than
+	transform differences. Precomputing
 	T and T^T once per call avoids clutter in the inner loops.
 	*/
 	void build_dct_mats_cpu(float T[64], float Tt[64]) {
@@ -166,12 +166,15 @@ namespace {
 
 } // namespace
 
-void compress_image_rgb_cpu(const ImageRGB& in, ImageRGB& out, int quality) {
+void compress_image_rgb_cpu(const ImageRGB& in, ImageRGB& out, int quality,
+	const QualityMapConfig& quality_map) {
 	if (out.width != in.width || out.height != in.height ||
 		(int)out.r.size() != in.width * in.height ||
 		(int)out.g.size() != in.width * in.height ||
 		(int)out.b.size() != in.width * in.height)
 		throw std::runtime_error("compress_image_rgb_cpu: 'out' mis-sized.");
+
+	(void)quality_map; // quality map applied in later steps (plumbing placeholder)
 
 	uint8_t qL[64], qC_unused[64];
 	make_scaled_quant_tables(quality, qL, qC_unused);

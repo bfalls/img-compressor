@@ -18,7 +18,7 @@ keep `main.cu` extremely simple.
    - The CPU reference path gets predictable cache lines when iterating
      by channel and block. This reduces surprise perf gaps due to
      accidental AoS striding.
-   - The separation also mirrors JPEG’s 8x8 block- and component-first
+   - The separation also mirrors JPEG's 8x8 block- and component-first
      pipeline (luma vs chroma), which simplifies reasoning and testing.
 */
 struct ImageRGB {
@@ -87,7 +87,8 @@ void compress_image_rgb_gpu(const ImageRGB& in, ImageRGB& out,
     const QualityMapConfig& quality_map = {});
 
 // Optional utility if you want to benchmark channels separately.
-void compress_channel_gpu(const uint8_t* src, uint8_t* dst, int width, int height);
+void compress_channel_gpu(const uint8_t* src, uint8_t* dst, int width, int height,
+    const float* inv_block_scales = nullptr);
 
 // CPU reference (for --compare)
 void compress_image_rgb_cpu(const ImageRGB& in, ImageRGB& out, int quality,

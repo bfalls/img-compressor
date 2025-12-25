@@ -13,7 +13,7 @@ jobs:
 
       # Install CUDA Toolkit so MSBuild can import CUDA 12.9.props/targets and run nvcc.
       - name: Install CUDA Toolkit 12.9
-      - uses: Jimver/cuda-toolkit@v0.2.29
+        uses: Jimver/cuda-toolkit@v0.2.29
         with:
           cuda: "12.9.1"
           method: "network"

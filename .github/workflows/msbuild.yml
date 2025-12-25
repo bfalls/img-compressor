@@ -164,9 +164,8 @@ jobs:
       - name: Restore & Build
         shell: pwsh
         run: |
-          msbuild img-compressor.sln /m /p:Configuration=Release /p:Platform=x64 /v:m `
-            /p:Configuration=Release `
-            /p:Platform=x64 `
+          msbuild img-compressor.sln /m /p:Configuration=Release /p:Platform=x64 `
+            /v:diag `
             /p:VcpkgEnableManifest=true `
             /p:VcpkgManifestRoot="${{ github.workspace }}" `
             /p:VCPKG_TARGET_TRIPLET="$env:VCPKG_DEFAULT_TRIPLET" `

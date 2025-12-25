@@ -25,18 +25,11 @@ jobs:
           Write-Host "Workspace:   $env:GITHUB_WORKSPACE"
 
       - name: Enable vcpkg binary cache
+        if: runner.environment == 'self-hosted'
         shell: pwsh
         run: |
-          New-Item -ItemType Directory -Force -Path "${{ github.workspace }}\.vcpkg_cache" | Out-Null
-          "VCPKG_BINARY_SOURCES=clear;files,${{ github.workspace }}\.vcpkg_cache,readwrite" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
-
-      - name: Cache vcpkg binary cache
-        uses: actions/cache@v4
-        with:
-          path: ${{ github.workspace }}\.vcpkg_cache
-          key: vcpkg-bin-${{ runner.os }}-${{ hashFiles('**/vcpkg.json', '**/vcpkg-configuration.json') }}
-          restore-keys: |
-            vcpkg-bin-${{ runner.os }}-
+          New-Item -ItemType Directory -Force -Path "C:\vcpkg-bincache\img-compressor" | Out-Null
+          "VCPKG_BINARY_SOURCES=clear;files,C:\vcpkg-bincache\img-compressor,readwrite" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
 
       - name: Setup MSVC environment (x64)
         shell: pwsh
@@ -179,7 +172,7 @@ jobs:
         shell: pwsh
         run: |
           msbuild img-compressor.sln /m /p:Configuration=Release /p:Platform=x64 `
-            /v:diag `
+            /v:m `
             /p:VcpkgEnableManifest=true `
             /p:VcpkgManifestRoot="${{ github.workspace }}" `
             /p:VCPKG_TARGET_TRIPLET="$env:VCPKG_DEFAULT_TRIPLET" `

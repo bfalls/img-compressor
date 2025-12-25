@@ -22,6 +22,7 @@ jobs:
           Write-Host "Runner OS:   $env:RUNNER_OS"
           Write-Host "Runner arch: $env:RUNNER_ARCH"
           Write-Host "Runner env:  $env:RUNNER_ENVIRONMENT"
+          Write-Host "Workspace:   $env:GITHUB_WORKSPACE"
 
       - name: Setup MSVC environment (x64)
         shell: pwsh
@@ -42,6 +43,13 @@ jobs:
                 "$($matches[1])=$($matches[2])" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
               }
             }
+
+      - name: Force vcpkg env (override VS built-in)
+        shell: pwsh
+        run: |
+          "VCPKG_ROOT=${{ github.workspace }}\vcpkg" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "VCPKG_DEFAULT_TRIPLET=x64-windows"       | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "VCPKG_INSTALLED_DIR=${{ github.workspace }}\vcpkg\installed" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
 
       # Install CUDA Toolkit so MSBuild can import CUDA 13.0.props/targets and run nvcc.
       - name: Install CUDA Toolkit 13.0 (hosted runners only)
@@ -138,26 +146,27 @@ jobs:
 
           if (-not $env:VCPKG_INSTALLED_DIR) { throw "VCPKG_INSTALLED_DIR is not set (run-vcpkg did not export it)." }
 
-          $triplet = $env:VCPKG_TARGET_TRIPLET
+          $triplet = $env:VCPKG_DEFAULT_TRIPLET
           if (-not $triplet) { $triplet = $env:VCPKG_DEFAULT_TRIPLET }
           if (-not $triplet) { $triplet = "x64-windows" }
 
           $hdr = Join-Path $env:VCPKG_INSTALLED_DIR "$triplet\include\jpeglib.h"
           Write-Host "Checking: $hdr"
           if (-not (Test-Path $hdr)) {
-            Write-Host "Top of include dir:"
-            Get-ChildItem (Split-Path $hdr -Parent) -ErrorAction SilentlyContinue | Select-Object -First 50
-            throw "jpeglib.h not found in vcpkg installed include dir"
+            Get-ChildItem (Join-Path $env:VCPKG_INSTALLED_DIR "$triplet\include") -ErrorAction SilentlyContinue | Select-Object -First 50
+            throw "jpeglib.h not found"
           }
-
           Write-Host "OK: Found jpeglib.h"
 
       - name: Add MSBuild to PATH
         uses: microsoft/setup-msbuild@v2
 
       - name: Restore & Build
+        shell: pwsh
         run: |
           msbuild img-compressor.sln /m /p:Configuration=Release /p:Platform=x64 /v:m `
+            /p:Configuration=Release `
+            /p:Platform=x64 `
             /p:VcpkgEnableManifest=true `
             /p:VcpkgManifestRoot="${{ github.workspace }}" `
             /p:VCPKG_TARGET_TRIPLET="$env:VCPKG_DEFAULT_TRIPLET" `

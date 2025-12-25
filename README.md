@@ -61,14 +61,28 @@ with optional CPU comparison for benchmarking and verification.
    [CPU] wrote .\tests\artifacts\out-cpu.jpg in 402.399 ms
    ```
 
-### Quality map demo (content-aware scaling)
+### Quick demos
 
-Generate a per-block saliency heatmap and compare CPU/GPU outputs with timings and PSNR:
+**Baseline (no quality map):**
+
+```powershell
+.\x64\Debug\img-compressor.exe --input tests\data\img-test.png --output tests\artifacts\out.jpg --quality 85 --compare
+```
+
+This runs GPU (if available) and CPU, writing `out-gpu.jpg` / `out-cpu.jpg` plus a timing/size table.
+
+**Content-aware quality map (with debug outputs):**
 
 ```powershell
 .\x64\Debug\img-compressor.exe --input tests\data\img-test.png --output tests\artifacts\out.jpg --quality 85 --compare --quality-map --quality-map-debug tests\artifacts
 ```
 
-This writes `importance_heatmap.pgm` / `block_map.csv` alongside the JPEG outputs and prints a small summary table.
+Flags of interest:
+- `--quality-map`: enable saliency-based, per-block coefficient scaling.
+- `--quality-map-strength <0..1>`: blend amount (default `0.6`).
+- `--quality-map-min-scale` / `--quality-map-max-scale`: bounds for per-block scaling (defaults `0.7` / `1.6`).
+- `--quality-map-debug <dir>`: writes `importance_heatmap.pgm` and `block_map.csv` to the directory you provide. When combining `--compare` + `--quality-map`, debug artifacts auto-drop next to the output if you omit this flag.
+
+The quality-map run outputs GPU/CPU JPEGs (with `-gpu`/`-cpu` suffixes), a comparison table (size, time, PSNR vs GPU when applicable), and the saliency heatmap/CSV for inspection.
 
    [![Hits](https://hits.sh/github.com/bfalls/img-compressor.svg?style=plastic)](https://hits.sh/github.com/bfalls/img-compressor/)

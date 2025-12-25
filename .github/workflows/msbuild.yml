@@ -7,17 +7,56 @@ on:
 jobs:
   build:
     runs-on: windows-latest
+
     steps:
       - uses: actions/checkout@v4
+
+      # Install CUDA Toolkit so MSBuild can import CUDA 12.9.props/targets and run nvcc.
+      - name: Install CUDA Toolkit 12.9
+      - uses: Jimver/cuda-toolkit@v0.2.29
+        with:
+          cuda: "12.9.1"
+          method: "network"
+
+      # Sanity check: make sure the VS integration files exist.
+      - name: Verify CUDA Build Customizations exist
+        shell: pwsh
+        run: |
+          Write-Host "CUDA_PATH=$env:CUDA_PATH"
+          if (-not (Test-Path "$env:CUDA_PATH\bin\nvcc.exe")) {
+            throw "nvcc.exe not found under CUDA_PATH. CUDA install failed."
+          }
+
+          # Look for the versioned .props/.targets under the VS MSBuild BuildCustomizations folder
+          $paths = @(
+            "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\MSBuild\Microsoft\VC\v170\BuildCustomizations",
+            "C:\Program Files\Microsoft Visual Studio\2022\Professional\MSBuild\Microsoft\VC\v170\BuildCustomizations",
+            "C:\Program Files\Microsoft Visual Studio\2022\Community\MSBuild\Microsoft\VC\v170\BuildCustomizations",
+            "C:\Program Files (x86)\Microsoft Visual Studio\2022\Enterprise\MSBuild\Microsoft\VC\v170\BuildCustomizations",
+            "C:\Program Files (x86)\Microsoft Visual Studio\2022\Professional\MSBuild\Microsoft\VC\v170\BuildCustomizations",
+            "C:\Program Files (x86)\Microsoft Visual Studio\2022\Community\MSBuild\Microsoft\VC\v170\BuildCustomizations"
+          )
+
+          $bc = $paths | Where-Object { Test-Path $_ } | Select-Object -First 1
+          if (-not $bc) { throw "VS BuildCustomizations folder not found on runner." }
+
+          Write-Host "VS BuildCustomizations folder: $bc"
+          if (-not (Test-Path "$bc\CUDA 12.9.props")) { throw "Missing: $bc\CUDA 12.9.props" }
+          if (-not (Test-Path "$bc\CUDA 12.9.targets")) { throw "Missing: $bc\CUDA 12.9.targets" }
+
+          & "$env:CUDA_PATH\bin\nvcc.exe" --version
+
       - name: Bootstrap vcpkg
         uses: lukka/run-vcpkg@v11
         with:
-          vcpkgGitCommitId: '365f6444ab40ee87c73c947b475b3a267b3cb77c'
-          vcpkgDirectory: '${{ github.workspace }}/vcpkg'
+          vcpkgGitCommitId: 'latest'
+          vcpkgDirectory: '${{ runner.workspace }}/vcpkg'
           runVcpkgInstall: true
           vcpkgJsonGlob: 'vcpkg.json'
+
       - name: Add MSBuild to PATH
         uses: microsoft/setup-msbuild@v2
+
       - name: Restore & Build
         run: |
           msbuild img-compressor.sln /m /p:Configuration=Release /p:Platform=x64 /v:m

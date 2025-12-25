@@ -192,12 +192,18 @@ int main(int argc, char** argv) {
 			}
 		}
 
-		if (do_compare && gpu_ran && quality_map.enabled) {
+		if (do_compare && quality_map.enabled) {
 			std::printf("\n=== compare (quality map %s) ===\n", quality_map.enabled ? "on" : "off");
 			std::printf("%-6s | %10s | %10s | %12s\n", "path", "size (KB)", "time (ms)", "PSNR vs GPU");
 			std::printf("-------------------------------\n");
-			std::printf("%-6s | %10.1f | %10.3f | %12s\n",
-				"GPU", sz_gpu / 1024.0, ms_gpu, "--");
+			if (gpu_ran) {
+				std::printf("%-6s | %10.1f | %10.3f | %12s\n",
+					"GPU", sz_gpu / 1024.0, ms_gpu, "--");
+			}
+			else {
+				std::printf("%-6s | %10s | %10s | %12s\n",
+					"GPU", "n/a", "n/a", "n/a");
+			}
 			if (psnr_cpu_vs_gpu >= 0.0) {
 				std::printf("%-6s | %10.1f | %10.3f | %12.3f\n",
 					"CPU", sz_cpu / 1024.0, ms_cpu, psnr_cpu_vs_gpu);

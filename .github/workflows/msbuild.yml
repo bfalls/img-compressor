@@ -1,15 +1,29 @@
 name: msbuild
 
 on:
-  push:
   pull_request:
+  push:
+    branches: [ main ]
 
 jobs:
   build:
-    runs-on: windows-latest
+    runs-on: [self-hosted, windows, cuda]
+    if: >
+      github.event_name != 'pull_request'
+      || github.event.pull_request.head.repo.fork == false
 
     steps:
       - uses: actions/checkout@v4
+
+      - name: Verify toolchain
+        shell: pwsh
+        run: |
+          Write-Host "CUDA_PATH=$env:CUDA_PATH"
+          where.exe cl
+          where.exe msbuild
+          where.exe nvcc
+          nvcc --version
+          cl
 
       # Install CUDA Toolkit so MSBuild can import CUDA 12.9.props/targets and run nvcc.
       - name: Install CUDA Toolkit 12.9

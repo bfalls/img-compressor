@@ -65,10 +65,10 @@
   <PropertyGroup Label="UserMacros" />
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <LinkIncremental>true</LinkIncremental>
-    <IncludePath>$(CUDA_PATH)\include;$(ProjectDir)third_party;$(ProjectDir)include;$(IncludePath)</IncludePath>
+    <IncludePath>$(VCPKG_INSTALLED_DIR)\$(VcpkgTriplet)\include;$(CUDA_PATH)\include;$(ProjectDir)third_party;$(ProjectDir)include;$(IncludePath)</IncludePath>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
-    <IncludePath>$(CUDA_PATH)\include;$(ProjectDir)third_party;$(ProjectDir)include;$(IncludePath)</IncludePath>
+    <IncludePath>$(VCPKG_INSTALLED_DIR)\$(VcpkgTriplet)\include;$(CUDA_PATH)\include;$(ProjectDir)third_party;$(ProjectDir)include;$(IncludePath)</IncludePath>
   </PropertyGroup>
   <PropertyGroup Label="Vcpkg">
     <VcpkgEnableManifest>true</VcpkgEnableManifest>

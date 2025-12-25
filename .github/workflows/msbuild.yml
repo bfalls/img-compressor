@@ -16,10 +16,12 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Show runner
+        shell: pwsh
         run: |
-          echo "Runner name: $RUNNER_NAME"
-          echo "Runner OS:   $RUNNER_OS"
-          echo "Runner arch: $RUNNER_ARCH"
+          Write-Host "Runner name: $env:RUNNER_NAME"
+          Write-Host "Runner OS:   $env:RUNNER_OS"
+          Write-Host "Runner arch: $env:RUNNER_ARCH"
+          Write-Host "Runner env:  $env:RUNNER_ENVIRONMENT"
 
       - name: Setup MSVC environment (x64)
         shell: pwsh
@@ -93,6 +95,8 @@ jobs:
         run: |
           "VCPKG_INSTALLED_DIR=${{ github.workspace }}\.vcpkg_installed" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
           "VCPKG_DEFAULT_TRIPLET=x64-windows" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "VCPKG_TARGET_TRIPLET=x64-windows" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
 
       - name: Bootstrap vcpkg
         uses: lukka/run-vcpkg@v11
@@ -101,6 +105,28 @@ jobs:
           vcpkgGitURL: https://github.com/microsoft/vcpkg.git
           runVcpkgInstall: true
           doNotCache: true
+
+      - name: Verify jpeg.lib exists in vcpkg
+        shell: pwsh
+        run: |
+          Write-Host "VCPKG_INSTALLED_DIR=$env:VCPKG_INSTALLED_DIR"
+          Write-Host "VCPKG_TARGET_TRIPLET=$env:VCPKG_TARGET_TRIPLET"
+          Write-Host "VCPKG_DEFAULT_TRIPLET=$env:VCPKG_DEFAULT_TRIPLET"
+
+          $triplet = $env:VCPKG_TARGET_TRIPLET
+          if (-not $triplet) { $triplet = $env:VCPKG_DEFAULT_TRIPLET }
+          if (-not $triplet) { $triplet = "x64-windows" }
+
+          $lib  = Join-Path $env:VCPKG_INSTALLED_DIR "$triplet\lib\jpeg.lib"
+          $dlib = Join-Path $env:VCPKG_INSTALLED_DIR "$triplet\debug\lib\jpeg.lib"
+
+          Write-Host "Checking release lib: $lib"
+          if (-not (Test-Path $lib)) { throw "jpeg.lib not found (release)" }
+
+          Write-Host "Checking debug lib: $dlib"
+          if (-not (Test-Path $dlib)) { Write-Host "Note: debug jpeg.lib not found (may be OK for Release build)" }
+
+          Write-Host "OK: jpeg.lib present"
 
       - name: Verify vcpkg jpeg headers exist
         shell: pwsh
@@ -134,5 +160,5 @@ jobs:
           msbuild img-compressor.sln /m /p:Configuration=Release /p:Platform=x64 /v:m `
             /p:VcpkgEnableManifest=true `
             /p:VcpkgManifestRoot="${{ github.workspace }}" `
-            /p:VcpkgTriplet="$env:VCPKG_DEFAULT_TRIPLET" `
-            /p:VcpkgInstalledDir="$env:VCPKG_INSTALLED_DIR"
+            /p:VCPKG_TARGET_TRIPLET="$env:VCPKG_DEFAULT_TRIPLET" `
+            /p:VCPKG_INSTALLED_DIR="$env:VCPKG_INSTALLED_DIR"

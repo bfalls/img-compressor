@@ -12,7 +12,7 @@ jobs:
       - name: Bootstrap vcpkg
         uses: lukka/run-vcpkg@v11
         with:
-          vcpkgGitCommitId: 'latest'
+          vcpkgGitCommitId: '365f6444ab40ee87c73c947b475b3a267b3cb77c'
           vcpkgDirectory: '${{ github.workspace }}/vcpkg'
           runVcpkgInstall: true
           vcpkgJsonGlob: 'vcpkg.json'

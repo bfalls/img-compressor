@@ -96,6 +96,30 @@ jobs:
           runVcpkgInstall: true
           doNotCache: true
 
+      - name: Verify vcpkg jpeg headers exist
+        shell: pwsh
+        run: |
+          Write-Host "VCPKG_ROOT=$env:VCPKG_ROOT"
+          Write-Host "VCPKG_INSTALLED_DIR=$env:VCPKG_INSTALLED_DIR"
+          Write-Host "VCPKG_DEFAULT_TRIPLET=$env:VCPKG_DEFAULT_TRIPLET"
+          Write-Host "VCPKG_TARGET_TRIPLET=$env:VCPKG_TARGET_TRIPLET"
+
+          if (-not $env:VCPKG_INSTALLED_DIR) { throw "VCPKG_INSTALLED_DIR is not set (run-vcpkg did not export it)." }
+
+          $triplet = $env:VCPKG_TARGET_TRIPLET
+          if (-not $triplet) { $triplet = $env:VCPKG_DEFAULT_TRIPLET }
+          if (-not $triplet) { $triplet = "x64-windows" }
+
+          $hdr = Join-Path $env:VCPKG_INSTALLED_DIR "$triplet\include\jpeglib.h"
+          Write-Host "Checking: $hdr"
+          if (-not (Test-Path $hdr)) {
+            Write-Host "Top of include dir:"
+            Get-ChildItem (Split-Path $hdr -Parent) -ErrorAction SilentlyContinue | Select-Object -First 50
+            throw "jpeglib.h not found in vcpkg installed include dir"
+          }
+
+          Write-Host "OK: Found jpeglib.h"
+
       - name: Add MSBuild to PATH
         uses: microsoft/setup-msbuild@v2
 

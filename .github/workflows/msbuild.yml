@@ -91,10 +91,10 @@ jobs:
       - name: Bootstrap vcpkg
         uses: lukka/run-vcpkg@v11
         with:
-          vcpkgGitCommitId: 'latest'
-          vcpkgDirectory: '${{ runner.workspace }}/vcpkg'
+          vcpkgDirectory: ${{ github.workspace }}\vcpkg
+          vcpkgGitURL: https://github.com/microsoft/vcpkg.git
           runVcpkgInstall: true
-          vcpkgJsonGlob: 'vcpkg.json'
+          doNotCache: true
 
       - name: Add MSBuild to PATH
         uses: microsoft/setup-msbuild@v2

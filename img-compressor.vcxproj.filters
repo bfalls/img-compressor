@@ -18,6 +18,9 @@
     <ClInclude Include="include\compressor.hpp">
       <Filter>include</Filter>
     </ClInclude>
+    <ClInclude Include="include\saliency.hpp">
+      <Filter>include</Filter>
+    </ClInclude>
     <ClInclude Include="third_party\stb_image.h">
       <Filter>third_party</Filter>
     </ClInclude>
@@ -37,6 +40,9 @@
     <ClCompile Include="src\compressor_cpu.cpp">
       <Filter>src</Filter>
     </ClCompile>
+    <ClCompile Include="src\saliency.cpp">
+      <Filter>src</Filter>
+    </ClCompile>    
     <ClCompile Include="src\jpeg_scanline_writer.cpp" />
   </ItemGroup>
   <ItemGroup>

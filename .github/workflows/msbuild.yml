@@ -1,23 +1,179 @@
 name: msbuild
 
 on:
-  push:
   pull_request:
+  push:
+    branches: [ main ]
 
 jobs:
   build:
-    runs-on: windows-latest
+    runs-on: [self-hosted, windows, cuda]
+    if: >
+      github.event_name != 'pull_request'
+      || github.event.pull_request.head.repo.fork == false
+
     steps:
       - uses: actions/checkout@v4
+
+      - name: Show runner
+        shell: pwsh
+        run: |
+          Write-Host "Runner name: $env:RUNNER_NAME"
+          Write-Host "Runner OS:   $env:RUNNER_OS"
+          Write-Host "Runner arch: $env:RUNNER_ARCH"
+          Write-Host "Runner env:  $env:RUNNER_ENVIRONMENT"
+          Write-Host "Workspace:   $env:GITHUB_WORKSPACE"
+
+      - name: Enable vcpkg binary cache
+        if: runner.environment == 'self-hosted'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path "C:\vcpkg-bincache\img-compressor" | Out-Null
+          "VCPKG_BINARY_SOURCES=clear;files,C:\vcpkg-bincache\img-compressor,readwrite" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Setup MSVC environment (x64)
+        shell: pwsh
+        run: |
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          if (!(Test-Path $vswhere)) { throw "vswhere not found at $vswhere" }
+
+          $vsPath = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+          if (!$vsPath) { throw "Visual Studio with C++ tools not found" }
+
+          $vsDevCmd = Join-Path $vsPath "Common7\Tools\VsDevCmd.bat"
+          if (!(Test-Path $vsDevCmd)) { throw "VsDevCmd.bat not found at $vsDevCmd" }
+
+          # Run VsDevCmd and capture the resulting environment for this Actions job
+          cmd /c "`"$vsDevCmd`" -arch=x64 -host_arch=x64 && set" |
+            ForEach-Object {
+              if ($_ -match "^(.*?)=(.*)$") {
+                "$($matches[1])=$($matches[2])" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+              }
+            }
+
+      - name: Force vcpkg env (override VS built-in)
+        shell: pwsh
+        run: |
+          "VCPKG_ROOT=${{ github.workspace }}\vcpkg" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "VCPKG_DEFAULT_TRIPLET=x64-windows"       | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "VCPKG_INSTALLED_DIR=${{ github.workspace }}\vcpkg\installed" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      # Install CUDA Toolkit so MSBuild can import CUDA 13.0.props/targets and run nvcc.
+      - name: Install CUDA Toolkit 13.0 (hosted runners only)
+        if: runner.environment != 'self-hosted'
+        uses: Jimver/cuda-toolkit@v0.2.29
+        with:
+          cuda: "13.0.2"
+          method: "network"
+
+      - name: Verify toolchain
+        shell: pwsh
+        run: |
+          Write-Host "CUDA_PATH=$env:CUDA_PATH"
+          where.exe cl
+          where.exe msbuild
+          where.exe nvcc
+          nvcc --version
+          cl
+
+      # Sanity check: make sure the VS integration files exist.
+      - name: Verify CUDA Build Customizations exist
+        if: runner.environment != 'self-hosted'
+        shell: pwsh
+        run: |
+          Write-Host "CUDA_PATH=$env:CUDA_PATH"
+          if (-not (Test-Path "$env:CUDA_PATH\bin\nvcc.exe")) {
+            throw "nvcc.exe not found under CUDA_PATH. CUDA install failed."
+          }
+
+          # Look for the versioned .props/.targets under the VS MSBuild BuildCustomizations folder
+          $paths = @(
+            "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\MSBuild\Microsoft\VC\v170\BuildCustomizations",
+            "C:\Program Files\Microsoft Visual Studio\2022\Professional\MSBuild\Microsoft\VC\v170\BuildCustomizations",
+            "C:\Program Files\Microsoft Visual Studio\2022\Community\MSBuild\Microsoft\VC\v170\BuildCustomizations",
+            "C:\Program Files (x86)\Microsoft Visual Studio\2022\Enterprise\MSBuild\Microsoft\VC\v170\BuildCustomizations",
+            "C:\Program Files (x86)\Microsoft Visual Studio\2022\Professional\MSBuild\Microsoft\VC\v170\BuildCustomizations",
+            "C:\Program Files (x86)\Microsoft Visual Studio\2022\Community\MSBuild\Microsoft\VC\v170\BuildCustomizations"
+          )
+
+          $bc = $paths | Where-Object { Test-Path $_ } | Select-Object -First 1
+          if (-not $bc) { throw "VS BuildCustomizations folder not found on runner." }
+
+          Write-Host "VS BuildCustomizations folder: $bc"
+          if (-not (Test-Path "$bc\CUDA 13.0.props")) { throw "Missing: $bc\CUDA 13.0.props" }
+          if (-not (Test-Path "$bc\CUDA 13.0.targets")) { throw "Missing: $bc\CUDA 13.0.targets" }
+
+          & "$env:CUDA_PATH\bin\nvcc.exe" --version
+
+      - name: Set vcpkg install root
+        shell: pwsh
+        run: |
+          "VCPKG_INSTALLED_DIR=${{ github.workspace }}\.vcpkg_installed" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "VCPKG_DEFAULT_TRIPLET=x64-windows" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "VCPKG_TARGET_TRIPLET=x64-windows" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+
       - name: Bootstrap vcpkg
         uses: lukka/run-vcpkg@v11
         with:
-          vcpkgGitCommitId: 'latest'
-          vcpkgDirectory: '${{ runner.workspace }}/vcpkg'
+          vcpkgDirectory: ${{ github.workspace }}\vcpkg
+          vcpkgGitURL: https://github.com/microsoft/vcpkg.git
           runVcpkgInstall: true
-          vcpkgJsonGlob: 'vcpkg.json'
+          doNotCache: false
+
+      - name: Verify jpeg.lib exists in vcpkg
+        shell: pwsh
+        run: |
+          Write-Host "VCPKG_INSTALLED_DIR=$env:VCPKG_INSTALLED_DIR"
+          Write-Host "VCPKG_TARGET_TRIPLET=$env:VCPKG_TARGET_TRIPLET"
+          Write-Host "VCPKG_DEFAULT_TRIPLET=$env:VCPKG_DEFAULT_TRIPLET"
+
+          $triplet = $env:VCPKG_TARGET_TRIPLET
+          if (-not $triplet) { $triplet = $env:VCPKG_DEFAULT_TRIPLET }
+          if (-not $triplet) { $triplet = "x64-windows" }
+
+          $lib  = Join-Path $env:VCPKG_INSTALLED_DIR "$triplet\lib\jpeg.lib"
+          $dlib = Join-Path $env:VCPKG_INSTALLED_DIR "$triplet\debug\lib\jpeg.lib"
+
+          Write-Host "Checking release lib: $lib"
+          if (-not (Test-Path $lib)) { throw "jpeg.lib not found (release)" }
+
+          Write-Host "Checking debug lib: $dlib"
+          if (-not (Test-Path $dlib)) { Write-Host "Note: debug jpeg.lib not found (may be OK for Release build)" }
+
+          Write-Host "OK: jpeg.lib present"
+
+      - name: Verify vcpkg jpeg headers exist
+        shell: pwsh
+        run: |
+          Write-Host "VCPKG_ROOT=$env:VCPKG_ROOT"
+          Write-Host "VCPKG_INSTALLED_DIR=$env:VCPKG_INSTALLED_DIR"
+          Write-Host "VCPKG_DEFAULT_TRIPLET=$env:VCPKG_DEFAULT_TRIPLET"
+          Write-Host "VCPKG_TARGET_TRIPLET=$env:VCPKG_TARGET_TRIPLET"
+
+          if (-not $env:VCPKG_INSTALLED_DIR) { throw "VCPKG_INSTALLED_DIR is not set (run-vcpkg did not export it)." }
+
+          $triplet = $env:VCPKG_DEFAULT_TRIPLET
+          if (-not $triplet) { $triplet = $env:VCPKG_DEFAULT_TRIPLET }
+          if (-not $triplet) { $triplet = "x64-windows" }
+
+          $hdr = Join-Path $env:VCPKG_INSTALLED_DIR "$triplet\include\jpeglib.h"
+          Write-Host "Checking: $hdr"
+          if (-not (Test-Path $hdr)) {
+            Get-ChildItem (Join-Path $env:VCPKG_INSTALLED_DIR "$triplet\include") -ErrorAction SilentlyContinue | Select-Object -First 50
+            throw "jpeglib.h not found"
+          }
+          Write-Host "OK: Found jpeglib.h"
+
       - name: Add MSBuild to PATH
         uses: microsoft/setup-msbuild@v2
+
       - name: Restore & Build
+        shell: pwsh
         run: |
-          msbuild img-compressor.sln /m /p:Configuration=Release /p:Platform=x64 /v:m
+          msbuild img-compressor.sln /m /p:Configuration=Release /p:Platform=x64 `
+            /v:m `
+            /p:VcpkgEnableManifest=true `
+            /p:VcpkgManifestRoot="${{ github.workspace }}" `
+            /p:VCPKG_TARGET_TRIPLET="$env:VCPKG_DEFAULT_TRIPLET" `
+            /p:VCPKG_INSTALLED_DIR="$env:VCPKG_INSTALLED_DIR"

@@ -1,7 +1,11 @@
 #include <cuda_runtime.h>
 #include <math_constants.h>   // CUDART_PI_F
+#include <algorithm>
 #include <cmath>
+#include <vector>
+
 #include "compressor.hpp"
+#include "saliency.hpp"
 
 /*
 Device-resident state is kept in constant memory because the DCT basis and
@@ -15,12 +19,16 @@ __constant__ float   d_Tt[64];  // transpose [x,u]
 static bool g_inited = false;
 
 /*
-Rounding and saturating to 8-bit here mirrors JPEG’s final clamping behavior
+Rounding and saturating to 8-bit here mirrors JPEG's final clamping behavior
 and prevents device/host drift from float-to-int conversions.
 */
 __device__ __forceinline__ uint8_t clamp_u8(float v) {
 	v = fminf(255.f, fmaxf(0.f, v));
 	return static_cast<uint8_t>(v + 0.5f);
+}
+
+static inline float clampf(float v, float lo, float hi) {
+	return v < lo ? lo : (v > hi ? hi : v);
 }
 
 // Build exact 8x8 DCT and its transpose
@@ -39,13 +47,13 @@ static void build_dct_mats(float T[64], float Tt[64]) {
 /*
 Kernel: 8x8 DCT -> quant/dequant -> IDCT
 
-Tile size matches JPEG’s natural block size. Padding shared-memory rows by
+Tile size matches JPEG's natural block size. Padding shared-memory rows by
 +1 mitigates bank conflicts on older architectures. Edges are handled by
 clamped loads instead of divergence-heavy conditionals so partial tiles
 remain defined without branching.
 
 The quantize/dequantize step sits between forward and inverse transforms to
-emulate JPEG’s energy shaping. Dequantizing in-kernel ensures the output
+emulate JPEG's energy shaping. Dequantizing in-kernel ensures the output
 is directly comparable as pixels, without requiring a separate pass.
 
 Two fragile indexing points are explicitly documented:
@@ -60,12 +68,19 @@ predictable under profiling and simplifies future tiling work.
 */
 __global__ void k_dct8x8_quant_idct(const uint8_t* __restrict__ src,
 	uint8_t* __restrict__ dst,
-	int width, int height, int pitch)
+	int width, int height, int pitch,
+	const float* block_scales)
 {
 	const int bx = blockIdx.x * 8;
 	const int by = blockIdx.y * 8;
 	const int tx = threadIdx.x; // 0..7  -> x/column index
 	const int ty = threadIdx.y; // 0..7  -> y/row (or u in freq domain)
+
+	float block_scale = 1.0f;
+	if (block_scales) {
+		const int block_idx = blockIdx.y * gridDim.x + blockIdx.x;
+		block_scale = block_scales[block_idx];
+	}
 
 	__shared__ float s_in[8][9]; // +1 padding to avoid SMEM bank conflicts
 	__shared__ float s_tmp[8][9];
@@ -98,8 +113,14 @@ __global__ void k_dct8x8_quant_idct(const uint8_t* __restrict__ src,
 	s_out[ty][tx] = sum;
 	__syncthreads();
 
+	if (block_scale != 1.0f) {
+		// Per-block coefficient scaling (quality map) prior to quantization.
+		s_out[ty][tx] *= block_scale;
+	}
+	__syncthreads();
+
 	/*
-	Quantization is applied and immediately inverted to simulate JPEG’s
+	Quantization is applied and immediately inverted to simulate JPEG's
 	coefficient coarsening without introducing a bitstream. This preserves
 	the ability to compare pixel output directly while still exercising the
 	quality setting and energy compaction trade-offs.
@@ -164,7 +185,8 @@ benchmark just luma, or wire this into more elaborate pipelines (e.g., chroma
 subsampling) without changing the kernel. The grid maps 1:1 onto 8x8 tiles,
 which keeps the math simple.
 */
-void compress_channel_gpu(const uint8_t* src, uint8_t* dst, int width, int height)
+void compress_channel_gpu(const uint8_t* src, uint8_t* dst, int width, int height,
+	const float* inv_block_scales)
 {
 	if (!g_inited) init_compressor(90);
 
@@ -172,7 +194,7 @@ void compress_channel_gpu(const uint8_t* src, uint8_t* dst, int width, int heigh
 	dim3 block(8, 8);
 	dim3 grid((width + 7) / 8, (height + 7) / 8);
 
-	k_dct8x8_quant_idct << <grid, block >> > (src, dst, width, height, pitch);
+	k_dct8x8_quant_idct << <grid, block >> > (src, dst, width, height, pitch, inv_block_scales);
 	CUDA_CHECK(cudaGetLastError());
 }
 
@@ -185,11 +207,12 @@ obvious to callers.
 Each channel is transferred independently to align with the planar layout and
 to keep the kernel interface minimal.
 */
-void compress_image_rgb_gpu(const ImageRGB& in, ImageRGB& out)
+void compress_image_rgb_gpu(const ImageRGB& in, ImageRGB& out,
+	const QualityMapConfig& quality_map)
 {
 	if (out.width != in.width || out.height != in.height ||
 		(int)out.r.size() != in.width * in.height ||
-		(int)out.g.size() != in.width * in.height ||
+		(int)out.g.size() != in.width * in.height || 
 		(int)out.b.size() != in.width * in.height)
 	{
 		throw std::runtime_error("compress_image_rgb_gpu: 'out' buffers must be pre-sized to match 'in'.");
@@ -197,8 +220,72 @@ void compress_image_rgb_gpu(const ImageRGB& in, ImageRGB& out)
 
 	const size_t N = (size_t)in.width * in.height;
 
+	int blocks_x = (in.width + 7) / 8;
+	std::vector<float> inv_scales_main;
+	std::vector<float> inv_scales_chroma;
+
+	auto compute_block_scales = [&](const ImageRGB& img) {
+		if (!quality_map.enabled)
+			return;
+
+		SaliencyParams saliency_params;
+		QualityMapDebugConfig debug_cfg;
+		const QualityMapDebugConfig* debug_ptr = nullptr;
+		if (!quality_map.debug_output_path.empty()) {
+			debug_cfg.output_path = quality_map.debug_output_path;
+			debug_ptr = &debug_cfg;
+		}
+
+		const BlockImportanceMap importance = compute_block_importance(img, saliency_params, debug_ptr);
+		if (importance.values.empty())
+			return;
+
+		blocks_x = importance.blocks_x;
+		const int blocks_y = importance.blocks_y;
+		const size_t count = importance.values.size();
+		inv_scales_main.resize(count);
+		inv_scales_chroma.resize(count);
+
+		float min_scale = quality_map.min_scale;
+		float max_scale = quality_map.max_scale;
+		if (min_scale > max_scale)
+			std::swap(min_scale, max_scale);
+		const float strength = clampf(quality_map.strength, 0.0f, 1.0f);
+		const float min_allowed = 1e-6f;
+		min_scale = std::max(min_scale, min_allowed);
+		max_scale = std::max(max_scale, min_scale);
+
+		for (int by = 0; by < blocks_y; ++by) {
+			for (int bx = 0; bx < blocks_x; ++bx) {
+				const size_t idx = (size_t)by * blocks_x + bx;
+				const float s = clampf(importance.values[idx], 0.0f, 1.0f);
+				const float base = max_scale + (min_scale - max_scale) * s;
+				const float mixed = 1.0f + (base - 1.0f) * strength;
+				const float m = clampf(mixed, min_scale, max_scale);
+				const float inv = 1.0f / std::max(m, min_allowed);
+				inv_scales_main[idx] = inv;
+				inv_scales_chroma[idx] = 1.0f + (inv - 1.0f) * 0.5f;
+			}
+		}
+	};
+
+	compute_block_scales(in);
+
+	float* d_block_main = nullptr;
+	float* d_block_chroma = nullptr;
+	if (!inv_scales_main.empty()) {
+		const size_t bytes = inv_scales_main.size() * sizeof(float);
+		CUDA_CHECK(cudaMalloc(&d_block_main, bytes));
+		CUDA_CHECK(cudaMemcpy(d_block_main, inv_scales_main.data(), bytes, cudaMemcpyHostToDevice));
+	}
+	if (!inv_scales_chroma.empty()) {
+		const size_t bytes = inv_scales_chroma.size() * sizeof(float);
+		CUDA_CHECK(cudaMalloc(&d_block_chroma, bytes));
+		CUDA_CHECK(cudaMemcpy(d_block_chroma, inv_scales_chroma.data(), bytes, cudaMemcpyHostToDevice));
+	}
+
 	// Device buffers
-	uint8_t* d_r_src = nullptr, * d_g_src = nullptr, * d_b_src = nullptr;
+	uint8_t* d_r_src = nullptr, * d_g_src = nullptr, * d_b_src = nullptr;	
 	uint8_t* d_r_dst = nullptr, * d_g_dst = nullptr, * d_b_dst = nullptr;
 	CUDA_CHECK(cudaMalloc(&d_r_src, N));
 	CUDA_CHECK(cudaMalloc(&d_g_src, N));
@@ -212,9 +299,9 @@ void compress_image_rgb_gpu(const ImageRGB& in, ImageRGB& out)
 	CUDA_CHECK(cudaMemcpy(d_b_src, in.b.data(), N, cudaMemcpyHostToDevice));
 
 	// Process per channel
-	compress_channel_gpu(d_r_src, d_r_dst, in.width, in.height);
-	compress_channel_gpu(d_g_src, d_g_dst, in.width, in.height);
-	compress_channel_gpu(d_b_src, d_b_dst, in.width, in.height);
+	compress_channel_gpu(d_r_src, d_r_dst, in.width, in.height, d_block_main);
+	compress_channel_gpu(d_g_src, d_g_dst, in.width, in.height, d_block_chroma);
+	compress_channel_gpu(d_b_src, d_b_dst, in.width, in.height, d_block_chroma);
 
 	CUDA_CHECK(cudaMemcpy(out.r.data(), d_r_dst, N, cudaMemcpyDeviceToHost));
 	CUDA_CHECK(cudaMemcpy(out.g.data(), d_g_dst, N, cudaMemcpyDeviceToHost));
@@ -222,4 +309,6 @@ void compress_image_rgb_gpu(const ImageRGB& in, ImageRGB& out)
 
 	cudaFree(d_r_src); cudaFree(d_g_src); cudaFree(d_b_src);
 	cudaFree(d_r_dst); cudaFree(d_g_dst); cudaFree(d_b_dst);
+	if (d_block_main) cudaFree(d_block_main);
+	if (d_block_chroma) cudaFree(d_block_chroma);
 }

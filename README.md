@@ -61,5 +61,14 @@ with optional CPU comparison for benchmarking and verification.
    [CPU] wrote .\tests\artifacts\out-cpu.jpg in 402.399 ms
    ```
 
-   [![Hits](https://hits.sh/github.com/bfalls/img-compressor.svg?style=plastic)](https://hits.sh/github.com/bfalls/img-compressor/)
+### Quality map demo (content-aware scaling)
 
+Generate a per-block saliency heatmap and compare CPU/GPU outputs with timings and PSNR:
+
+```powershell
+.\x64\Debug\img-compressor.exe --input tests\data\img-test.png --output tests\artifacts\out.jpg --quality 85 --compare --quality-map --quality-map-debug tests\artifacts
+```
+
+This writes `importance_heatmap.pgm` / `block_map.csv` alongside the JPEG outputs and prints a small summary table.
+
+   [![Hits](https://hits.sh/github.com/bfalls/img-compressor.svg?style=plastic)](https://hits.sh/github.com/bfalls/img-compressor/)

@@ -5,6 +5,7 @@
 #include <vector>
 #include <chrono>
 #include <stdexcept>
+#include <fstream>
 
 /*
 stb_image is used for image decoding to keep the project self-contained.
@@ -55,6 +56,19 @@ static std::string with_suffix_before_ext(const std::string& path, const char* s
 	return path.substr(0, dot) + suffix + path.substr(dot);
 }
 
+static std::string parent_directory(const std::string& path) {
+	const size_t slash = path.find_last_of("/\\");
+	if (slash == std::string::npos) return ".";
+	if (slash == 0) return path.substr(0, 1);
+	return path.substr(0, slash);
+}
+
+static size_t file_size_bytes(const std::string& path) {
+	std::ifstream f(path, std::ios::binary | std::ios::ate);
+	if (!f) return 0;
+	return static_cast<size_t>(f.tellg());
+}
+
 static bool has_cuda_device()
 {
 	int count = 0;
@@ -76,6 +90,7 @@ int main(int argc, char** argv) {
 	bool do_compare = false;
 	QualityMapConfig quality_map;
 
+	// Parse args
 	for (int i = 1; i < argc; ++i) {
 		std::string a = argv[i];
 		if (a == "--input" && i + 1 < argc) in_path = argv[++i];
@@ -93,6 +108,11 @@ int main(int argc, char** argv) {
 	if (quality < 1) quality = 1;
 	if (quality > 100) quality = 100;
 
+	// Auto-enable debug artifacts when comparing with quality map unless a path was provided.
+	if (do_compare && quality_map.enabled && quality_map.debug_output_path.empty()) {
+		quality_map.debug_output_path = parent_directory(out_path);
+	}
+
 	// Load input image on CPU (stb_image handles PNG, JPEG, etc.)
 	int w = 0, h = 0, c = 0;
 	unsigned char* rgb = stbi_load(in_path.c_str(), &w, &h, &c, 3);
@@ -108,42 +128,85 @@ int main(int argc, char** argv) {
 	const bool gpu_ok = has_cuda_device();
 
 	try {
+		ImageRGB out_gpu;
+		ImageRGB out_cpu;
+		double ms_gpu = -1.0;
+		double ms_cpu = -1.0;
+		size_t sz_gpu = 0;
+		size_t sz_cpu = 0;
+		double psnr_cpu_vs_gpu = -1.0;
+		bool gpu_ran = false;
+
+		QualityMapConfig quality_map_gpu = quality_map;
+		QualityMapConfig quality_map_cpu = quality_map;
+		// Avoid duplicate debug artifacts during compare runs; prefer CPU to emit.
+		if (do_compare) {
+			quality_map_gpu.debug_output_path.clear();
+		}
+
 		if (gpu_ok) {
+			gpu_ran = true;
 			const std::string out_gpu_path = with_suffix_before_ext(out_path, "-gpu");
 			auto t0 = std::chrono::high_resolution_clock::now();
 
 			// initialize compressor (e.g. quantization tables, constants, device buffers) for given quality
 			init_compressor(quality);
 
-			ImageRGB out_gpu;
 			out_gpu.width = w; out_gpu.height = h;
 			out_gpu.r.resize((size_t)w * h);
 			out_gpu.g.resize((size_t)w * h);
 			out_gpu.b.resize((size_t)w * h);
 
-			compress_image_rgb_gpu(img, out_gpu, quality_map);  // CUDA pipeline to RGB
+			compress_image_rgb_gpu(img, out_gpu, quality_map_gpu);  // CUDA pipeline to RGB
 			CUDA_CHECK(cudaDeviceSynchronize());
 
 			jpeg_write_rgb_scanlines(out_gpu, out_gpu_path, quality);
 			auto t1 = std::chrono::high_resolution_clock::now();
-			double ms_gpu = std::chrono::duration<double, std::milli>(t1 - t0).count();
+			ms_gpu = std::chrono::duration<double, std::milli>(t1 - t0).count();
+			sz_gpu = file_size_bytes(out_gpu_path);
 			std::printf("[GPU] wrote %s in %.3f ms\n", out_gpu_path.c_str(), ms_gpu);
 		}
 
 		if (do_compare || !gpu_ok) {
 			const std::string out_cpu_path = with_suffix_before_ext(out_path, "-cpu");
 			auto t0 = std::chrono::high_resolution_clock::now();
-			ImageRGB out_cpu;
+
 			out_cpu.width = w; out_cpu.height = h;
 			out_cpu.r.resize((size_t)w * h);
 			out_cpu.g.resize((size_t)w * h);
 			out_cpu.b.resize((size_t)w * h);
 
-			compress_image_rgb_cpu(img, out_cpu, quality, quality_map);
+			compress_image_rgb_cpu(img, out_cpu, quality, quality_map_cpu);
 			jpeg_write_rgb_scanlines(out_cpu, out_cpu_path, quality);
 			auto t1 = std::chrono::high_resolution_clock::now();
-			double ms_cpu = std::chrono::duration<double, std::milli>(t1 - t0).count();
+			ms_cpu = std::chrono::duration<double, std::milli>(t1 - t0).count();
+			sz_cpu = file_size_bytes(out_cpu_path);
 			std::printf("[CPU] wrote %s in %.3f ms\n", out_cpu_path.c_str(), ms_cpu);
+
+			if (do_compare && gpu_ok) {
+				const double mse_r = mse_plane(out_cpu.r, out_gpu.r);
+				const double mse_g = mse_plane(out_cpu.g, out_gpu.g);
+				const double mse_b = mse_plane(out_cpu.b, out_gpu.b);
+				const double mse_avg = (mse_r + mse_g + mse_b) / 3.0;
+				psnr_cpu_vs_gpu = psnr_from_mse(mse_avg, 255.0);
+			}
+		}
+
+		if (do_compare && gpu_ran && quality_map.enabled) {
+			std::printf("\n=== compare (quality map %s) ===\n", quality_map.enabled ? "on" : "off");
+			std::printf("%-6s | %10s | %10s | %12s\n", "path", "size (KB)", "time (ms)", "PSNR vs GPU");
+			std::printf("-------------------------------\n");
+			std::printf("%-6s | %10.1f | %10.3f | %12s\n",
+				"GPU", sz_gpu / 1024.0, ms_gpu, "--");
+			if (psnr_cpu_vs_gpu >= 0.0) {
+				std::printf("%-6s | %10.1f | %10.3f | %12.3f\n",
+					"CPU", sz_cpu / 1024.0, ms_cpu, psnr_cpu_vs_gpu);
+			}
+			else {
+				std::printf("%-6s | %10.1f | %10.3f | %12s\n",
+					"CPU", sz_cpu / 1024.0, ms_cpu, "n/a");
+			}
+			std::printf("-------------------------------\n\n");
 		}
 	}
 	catch (const std::exception& e) {

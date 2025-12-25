@@ -15,6 +15,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Show runner
+        run: |
+          echo "Runner name: $RUNNER_NAME"
+          echo "Runner OS:   $RUNNER_OS"
+          echo "Runner arch: $RUNNER_ARCH"
+
       - name: Setup MSVC environment (x64)
         shell: pwsh
         run: |
@@ -35,6 +41,14 @@ jobs:
               }
             }
 
+      # Install CUDA Toolkit so MSBuild can import CUDA 13.0.props/targets and run nvcc.
+      - name: Install CUDA Toolkit 13.0 (hosted runners only)
+        if: runner.environment != 'self-hosted'
+        uses: Jimver/cuda-toolkit@v0.2.29
+        with:
+          cuda: "13.0.2"
+          method: "network"
+
       - name: Verify toolchain
         shell: pwsh
         run: |
@@ -45,15 +59,9 @@ jobs:
           nvcc --version
           cl
 
-      # Install CUDA Toolkit so MSBuild can import CUDA 12.9.props/targets and run nvcc.
-      - name: Install CUDA Toolkit 12.9
-        uses: Jimver/cuda-toolkit@v0.2.29
-        with:
-          cuda: "12.9.1"
-          method: "network"
-
       # Sanity check: make sure the VS integration files exist.
       - name: Verify CUDA Build Customizations exist
+        if: runner.environment != 'self-hosted'
         shell: pwsh
         run: |
           Write-Host "CUDA_PATH=$env:CUDA_PATH"
@@ -75,8 +83,8 @@ jobs:
           if (-not $bc) { throw "VS BuildCustomizations folder not found on runner." }
 
           Write-Host "VS BuildCustomizations folder: $bc"
-          if (-not (Test-Path "$bc\CUDA 12.9.props")) { throw "Missing: $bc\CUDA 12.9.props" }
-          if (-not (Test-Path "$bc\CUDA 12.9.targets")) { throw "Missing: $bc\CUDA 12.9.targets" }
+          if (-not (Test-Path "$bc\CUDA 13.0.props")) { throw "Missing: $bc\CUDA 13.0.props" }
+          if (-not (Test-Path "$bc\CUDA 13.0.targets")) { throw "Missing: $bc\CUDA 13.0.targets" }
 
           & "$env:CUDA_PATH\bin\nvcc.exe" --version
 

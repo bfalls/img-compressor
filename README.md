@@ -20,7 +20,7 @@ with optional CPU comparison for benchmarking and verification.
 ## Requirements
 
 - **Visual Studio 2022** with Desktop Development for C++
-- **CUDA Toolkit 12.9** or later
+- **CUDA Toolkit 13.0** or later
 - **vcpkg** (for dependency management)
 
 ---

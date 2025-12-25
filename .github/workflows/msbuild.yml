@@ -88,6 +88,12 @@ jobs:
 
           & "$env:CUDA_PATH\bin\nvcc.exe" --version
 
+      - name: Set vcpkg install root
+        shell: pwsh
+        run: |
+          "VCPKG_INSTALLED_DIR=${{ github.workspace }}\.vcpkg_installed" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "VCPKG_DEFAULT_TRIPLET=x64-windows" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
       - name: Bootstrap vcpkg
         uses: lukka/run-vcpkg@v11
         with:
@@ -125,4 +131,8 @@ jobs:
 
       - name: Restore & Build
         run: |
-          msbuild img-compressor.sln /m /p:Configuration=Release /p:Platform=x64 /v:m
+          msbuild img-compressor.sln /m /p:Configuration=Release /p:Platform=x64 /v:m `
+            /p:VcpkgEnableManifest=true `
+            /p:VcpkgManifestRoot="${{ github.workspace }}" `
+            /p:VcpkgTriplet="$env:VCPKG_DEFAULT_TRIPLET" `
+            /p:VcpkgInstalledDir="$env:VCPKG_INSTALLED_DIR"

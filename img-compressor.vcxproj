@@ -54,7 +54,7 @@
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
   <ImportGroup Label="ExtensionSettings">
-    <Import Project="$(VCTargetsPath)\BuildCustomizations\CUDA 12.9.props" />
+    <Import Project="$(VCTargetsPath)\BuildCustomizations\CUDA 12.9.props" Condition="Exists('$(VCTargetsPath)\BuildCustomizations\CUDA 12.9.props')" />
   </ImportGroup>
   <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
@@ -88,7 +88,7 @@
       <AdditionalDependencies>jpeg.lib;gdi32.lib;winspool.lib;comdlg32.lib;advapi32.lib;shell32.lib;ole32.lib;oleaut32.lib;uuid.lib;odbc32.lib;odbccp32.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <AdditionalLibraryDirectories>$(VCPKG_INSTALLED_DIR)\$(VCPKG_TARGET_TRIPLET)\debug\lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
     </Link>
-    <CudaCompile>
+    <CudaCompile Condition="Exists('$(VCTargetsPath)\BuildCustomizations\CUDA 12.9.targets')">
       <TargetMachinePlatform>64</TargetMachinePlatform>
       <CodeGeneration>compute_75,sm_75</CodeGeneration>
       <Include>$(ProjectDir)include,$(ProjectDir)third_party</Include>
@@ -115,7 +115,7 @@
       <AdditionalLibraryDirectories Condition="'$(Configuration)'=='Debug'">$(VCPKG_INSTALLED_DIR)\$(VCPKG_TARGET_TRIPLET)\debug\lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
       <AdditionalLibraryDirectories Condition="'$(Configuration)'=='Release'">$(VCPKG_INSTALLED_DIR)\$(VCPKG_TARGET_TRIPLET)\lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
     </Link>
-    <CudaCompile>
+    <CudaCompile Condition="Exists('$(VCTargetsPath)\BuildCustomizations\CUDA 12.9.targets')">
       <TargetMachinePlatform>64</TargetMachinePlatform>
       <Include>$(ProjectDir)include,$(ProjectDir)third_party</Include>
       <CodeGeneration>compute_75,sm_75</CodeGeneration>
@@ -124,6 +124,6 @@
   </ItemDefinitionGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
-    <Import Project="$(VCTargetsPath)\BuildCustomizations\CUDA 12.9.targets" />
+    <Import Project="$(VCTargetsPath)\BuildCustomizations\CUDA 12.9.targets" Condition="Exists('$(VCTargetsPath)\BuildCustomizations\CUDA 12.9.targets')" />
   </ImportGroup>
 </Project>

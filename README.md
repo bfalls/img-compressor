@@ -1,3 +1,11 @@
+<p align="center">
+  <img
+    src="assets/branding/img-compressor-hero.png"
+    alt="img-compressor — GPU-accelerated image compression with content-aware quality mapping"
+    width="1200"
+  />
+</p>
+
 # img-compressor
 
 A high-performance GPU-accelerated JPEG compressor written in C++ and CUDA.  

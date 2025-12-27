@@ -42,7 +42,7 @@
     </ClCompile>
     <ClCompile Include="src\saliency.cpp">
       <Filter>src</Filter>
-    </ClCompile>    
+    </ClCompile>
     <ClCompile Include="src\jpeg_scanline_writer.cpp" />
   </ItemGroup>
   <ItemGroup>

@@ -1,7 +1,7 @@
 <p align="center">
   <img
     src="assets/branding/img-compressor-hero.png"
-    alt="img-compressor — GPU-accelerated image compression with content-aware quality mapping"
+    alt="img-compressor - GPU-accelerated image compression with content-aware quality mapping"
     width="1200"
   />
 </p>
@@ -33,6 +33,14 @@ with optional CPU comparison for benchmarking and verification.
 
 ---
 
+## Download
+
+**Prebuilt binaries available on the
+[Releases page](https://github.com/bfalls/img-compressor/releases)**
+
+Supports:
+- Windows (x64)
+
 ## Build Instructions (Visual Studio)
 
 1. Clone this repository:
@@ -53,8 +61,14 @@ with optional CPU comparison for benchmarking and verification.
    Release x64 (optimized for speed)
 
 5. Build the project (Ctrl+Shift+B or Build -> Build Solution).
+  
+6. Or build on the command line:
+   ```powershell
+   msbuild img-compressor.sln "/t:Clean;Build" /p:Configuration=Debug /p:Platform=x64 /m /verbosity:minimal
+   msbuild img-compressor.sln "/t:Clean;Build" /p:Configuration=Release /p:Platform=x64 /m /verbosity:minimal
+   ```
 
-6. A sample image is included under tests\data\img-test.png.
+7. A sample image is included under tests\data\img-test.png.
    Run the compressor from the project root after building:
    ```powershell
     .\x64\Debug\img-compressor.exe --input tests\data\img-test.png --output tests\artifacts\out.jpg --quality 85 --compare

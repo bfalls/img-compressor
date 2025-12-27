@@ -29,6 +29,7 @@ Release/
 *.log
 *.tlog
 *.lastbuildstate
+dist/
 
 # Packages / archives
 *.zip

@@ -1,182 +1,127 @@
 <#
 .SYNOPSIS
-Packages a built Windows release executable into a GitHub-ready ZIP and generates SHA-256 checksums.
-
-.DESCRIPTION
-Creates a ZIP containing the provided executable at the archive root, plus optional accompanying files
-(defaults to README.md and LICENSE when present). The script writes artifacts to a dist/ directory and
-generates a SHA256SUMS.txt that includes every file in the output directory.
-
-.PARAMETER Version
-Version string (e.g., v0.1.0 or 0.1.0). Non-prefixed versions are normalized to start with "v" for filenames.
-
-.PARAMETER ExePath
-Path to the built executable (.exe). Must exist.
-
-.PARAMETER Name
-Base product name used in filenames. Defaults to "img-compressor".
-
-.PARAMETER Platform
-Platform identifier used in filenames. Defaults to "win-x64".
-
-.PARAMETER OutDir
-Output directory for artifacts. Defaults to ".\dist".
-
-.PARAMETER IncludeFiles
-Additional files to include in the ZIP when they exist. Defaults to including README.md and LICENSE when present.
+  Packages a Windows release ZIP for GitHub Releases and writes SHA256SUMS.txt.
 
 .EXAMPLE
-.\zip4release.ps1 -Version v0.1.0 -ExePath .\build\Release\img-compressor.exe
-
-.EXAMPLE
-.\zip4release.ps1 -Version 0.2.0-beta.1 -ExePath .\build\Release\img-compressor.exe -IncludeFiles @('CHANGELOG.md')
+  .\scripts\zip4release.ps1 -Version v0.1.0 -ExePath .\x64\Release\img-compressor.exe
 #>
+
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory = $true)]
-    [string]$Version,
+  [Parameter(Mandatory = $true)]
+  [ValidatePattern('^v?\d+\.\d+\.\d+(-[0-9A-Za-z\.\-]+)?$')]
+  [string]$Version,
 
-    [Parameter(Mandatory = $true)]
-    [string]$ExePath,
+  [Parameter(Mandatory = $true)]
+  [ValidateNotNullOrEmpty()]
+  [string]$ExePath,
 
-    [string]$Name = 'img-compressor',
-    [string]$Platform = 'win-x64',
-    [string]$OutDir = '.\dist',
-    [string[]]$IncludeFiles
+  [Parameter()]
+  [ValidateNotNullOrEmpty()]
+  [string]$Name = 'img-compressor',
+
+  [Parameter()]
+  [ValidateNotNullOrEmpty()]
+  [string]$Platform = 'win-x64',
+
+  [Parameter()]
+  [ValidateNotNullOrEmpty()]
+  [string]$OutDir = '.\dist',
+
+  [Parameter()]
+  [string[]]$IncludeFiles = @()
 )
 
 $ErrorActionPreference = 'Stop'
 
-$scriptRoot = Split-Path -Parent -Path $MyInvocation.MyCommand.Definition
-$repoRoot = $scriptRoot
-$versionPattern = '^v?\d+\.\d+\.\d+(-[0-9A-Za-z\.\-]+)?$'
+# Anchor everything to repo root (parent of scripts/)
+$repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 
-function Resolve-WithRepoRoot {
-    param(
-        [Parameter(Mandatory = $true)]
-        [string]$Path
-    )
-
-    if ([System.IO.Path]::IsPathRooted($Path)) {
-        return (Resolve-Path -LiteralPath $Path).ProviderPath
-    }
-
-    $combined = Join-Path -Path $repoRoot -ChildPath $Path
-    return (Resolve-Path -LiteralPath $combined).ProviderPath
+function Normalize-Version([string]$v) {
+  if ($v.StartsWith('v')) { return $v }
+  return "v$v"
 }
 
-function Add-OptionalFile {
-    param(
-        [Parameter(Mandatory = $true)]
-        [System.Collections.Generic.List[string]]$TargetList,
+$ver = Normalize-Version $Version
 
-        [Parameter(Mandatory = $true)]
-        [string]$CandidatePath,
-
-        [Parameter()]
-        [switch]$WarnIfMissing
-    )
-
-    if (-not (Test-Path -LiteralPath $CandidatePath)) {
-        if ($WarnIfMissing) {
-            Write-Warning "Skipping missing file: $CandidatePath"
-        }
-        return
-    }
-
-    $TargetList.Add((Resolve-Path -LiteralPath $CandidatePath).ProviderPath) | Out-Null
+# Resolve EXE path (relative paths should be relative to repo root)
+$exeAbs = $ExePath
+if (-not [System.IO.Path]::IsPathRooted($exeAbs)) {
+  $exeAbs = Join-Path $repoRoot $ExePath
 }
-
-if ($Version -notmatch $versionPattern) {
-    throw "Version '$Version' is invalid. Expected format: v0.1.0 or 0.1.0 (pre-release like v0.1.0-beta.1 allowed)."
+if (-not (Test-Path -LiteralPath $exeAbs)) {
+  throw "ExePath not found: $exeAbs"
 }
-
-$versionNormalized = if ($Version.StartsWith('v')) { $Version } else { "v$Version" }
-
-$outDirFullPath = if ([System.IO.Path]::IsPathRooted($OutDir)) {
-    [System.IO.Path]::GetFullPath($OutDir)
-} else {
-    [System.IO.Path]::GetFullPath((Join-Path -Path $repoRoot -ChildPath $OutDir))
+if ([System.IO.Path]::GetExtension($exeAbs).ToLowerInvariant() -ne '.exe') {
+  throw "ExePath must point to an .exe: $exeAbs"
 }
+$exeAbs = (Resolve-Path -LiteralPath $exeAbs).Path
 
-if (-not (Test-Path -LiteralPath $outDirFullPath)) {
-    Write-Host "Creating output directory: $outDirFullPath"
-    New-Item -ItemType Directory -Path $outDirFullPath -Force | Out-Null
+# Output paths
+$outAbs = $OutDir
+if (-not [System.IO.Path]::IsPathRooted($outAbs)) {
+  $outAbs = Join-Path $repoRoot $OutDir
 }
+New-Item -ItemType Directory -Force -Path $outAbs | Out-Null
 
-if (-not $PSBoundParameters.ContainsKey('IncludeFiles') -or -not $IncludeFiles) {
-    $IncludeFiles = @('README.md', 'LICENSE')
-}
+$zipName = "$Name-$ver-$Platform.zip"
+$zipPath = Join-Path $outAbs $zipName
+$shaPath = Join-Path $outAbs 'SHA256SUMS.txt'
 
-$exeFullPath = Resolve-WithRepoRoot -Path $ExePath
-if (-not (Test-Path -LiteralPath $exeFullPath)) {
-    throw "Executable not found at path: $ExePath"
-}
+Write-Host "RepoRoot:   $repoRoot"
+Write-Host "Version:    $ver"
+Write-Host "Exe:        $exeAbs"
+Write-Host "OutDir:     $outAbs"
+Write-Host "Zip:        $zipPath"
 
-if ([System.IO.Path]::GetExtension($exeFullPath) -ne '.exe') {
-    throw "Executable path must end with '.exe': $ExePath"
-}
-
-$filesToPackage = New-Object System.Collections.Generic.List[string]
-Add-OptionalFile -TargetList $filesToPackage -CandidatePath $exeFullPath -WarnIfMissing
-
-foreach ($file in $IncludeFiles) {
-    try {
-        $resolved = Resolve-WithRepoRoot -Path $file
-    } catch {
-        $resolved = $null
-    }
-
-    if ($null -ne $resolved) {
-        Add-OptionalFile -TargetList $filesToPackage -CandidatePath $resolved
-    } else {
-        Write-Warning "Skipping missing file: $file"
-    }
-}
-
-if ($filesToPackage.Count -eq 0) {
-    throw "No files found to package."
-}
-
-$zipName = "$Name-$versionNormalized-$Platform.zip"
-$zipPath = Join-Path -Path $outDirFullPath -ChildPath $zipName
-$checksumPath = Join-Path -Path $outDirFullPath -ChildPath 'SHA256SUMS.txt'
-
-Write-Host "Normalized version: $versionNormalized"
-Write-Host "Resolved executable: $exeFullPath"
-Write-Host "Output ZIP: $zipPath"
-Write-Host "Checksum file: $checksumPath"
-
-$stagingPath = Join-Path -Path $outDirFullPath -ChildPath ("zip-stage-{0}" -f ([guid]::NewGuid().ToString('N')))
-New-Item -ItemType Directory -Path $stagingPath -Force | Out-Null
+# Stage into a temp folder so ZIP has files at the root
+$tempRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("zip4release_" + [System.Guid]::NewGuid().ToString('N'))
+New-Item -ItemType Directory -Force -Path $tempRoot | Out-Null
 
 try {
-    foreach ($file in $filesToPackage) {
-        $destination = Join-Path -Path $stagingPath -ChildPath (Split-Path -Path $file -Leaf)
-        if (Test-Path -LiteralPath $destination) {
-            throw "File name conflict while staging: $destination already exists."
-        }
+  Copy-Item -LiteralPath $exeAbs -Destination (Join-Path $tempRoot (Split-Path $exeAbs -Leaf)) -Force
 
-        Copy-Item -LiteralPath $file -Destination $destination -Force
+  $readme = Join-Path $repoRoot 'README.md'
+  if (Test-Path -LiteralPath $readme) {
+    Copy-Item -LiteralPath $readme -Destination (Join-Path $tempRoot 'README.md') -Force
+  }
+
+  $license = Join-Path $repoRoot 'LICENSE'
+  if (Test-Path -LiteralPath $license) {
+    Copy-Item -LiteralPath $license -Destination (Join-Path $tempRoot 'LICENSE') -Force
+  }
+
+  foreach ($p in $IncludeFiles) {
+    $abs = $p
+    if (-not [System.IO.Path]::IsPathRooted($abs)) {
+      $abs = Join-Path $repoRoot $p
     }
-
-    if (Test-Path -LiteralPath $zipPath) {
-        Remove-Item -LiteralPath $zipPath -Force
+    if (Test-Path -LiteralPath $abs) {
+      $leaf = Split-Path $abs -Leaf
+      Copy-Item -LiteralPath $abs -Destination (Join-Path $tempRoot $leaf) -Force
+    } else {
+      Write-Warning "IncludeFiles not found, skipping: $p"
     }
+  }
 
-    $stagedFiles = Get-ChildItem -Path $stagingPath -File
-    Compress-Archive -LiteralPath $stagedFiles.FullName -DestinationPath $zipPath -Force
+  # Create ZIP from staged contents
+  if (Test-Path -LiteralPath $zipPath) { Remove-Item -LiteralPath $zipPath -Force }
+  Compress-Archive -Path (Join-Path $tempRoot '*') -DestinationPath $zipPath -Force
+
+  # Write checksums for all files in dist (at least the zip)
+  if (Test-Path -LiteralPath $shaPath) { Remove-Item -LiteralPath $shaPath -Force }
+
+  $distFiles = Get-ChildItem -LiteralPath $outAbs -File | Sort-Object Name
+  foreach ($f in $distFiles) {
+    $hash = (Get-FileHash -LiteralPath $f.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+    "$hash  $($f.Name)" | Out-File -LiteralPath $shaPath -Append -Encoding ascii
+  }
+
+  Write-Host "SHA256:     $shaPath"
+  Write-Host "Done."
 }
 finally {
-    Remove-Item -LiteralPath $stagingPath -Recurse -Force -ErrorAction SilentlyContinue
+  if (Test-Path -LiteralPath $tempRoot) {
+    Remove-Item -LiteralPath $tempRoot -Recurse -Force
+  }
 }
-
-$artifacts = Get-ChildItem -Path $outDirFullPath -File | Sort-Object -Property Name
-$checksumLines = @()
-foreach ($artifact in $artifacts) {
-    $hash = Get-FileHash -Algorithm SHA256 -LiteralPath $artifact.FullName
-    $checksumLines += ("{0}  {1}" -f $hash.Hash, $artifact.Name)
-}
-
-Set-Content -Path $checksumPath -Value $checksumLines -Encoding ASCII
-Write-Host "Packaging complete."

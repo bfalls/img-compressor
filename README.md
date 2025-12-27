@@ -11,7 +11,9 @@
 A high-performance GPU-accelerated JPEG compressor written in C++ and CUDA.  
 The tool supports both CPU and GPU paths for comparing compression performance and output quality.
 
-This project demonstrates efficient RGB image compression using CUDA kernels and a custom JPEG scanline writer,  
+In addition to standard quality-based compression, the tool supports **content-aware quality mapping**, which preserves visual detail in perceptually important regions while applying stronger compression elsewhere. Optional debug outputs make it easy to inspect and verify how quality is distributed across the image.
+
+This utility demonstrates efficient RGB image compression using CUDA kernels and a custom JPEG scanline writer, 
 with optional CPU comparison for benchmarking and verification.
 
 ---
@@ -21,6 +23,7 @@ with optional CPU comparison for benchmarking and verification.
 - GPU-accelerated image compression (CUDA)
 - Optional CPU comparison mode (`--compare`)
 - Quality control with `--quality` parameter
+- Content-aware quality mapping with visual debug outputs
 - Simple CLI tool
 
 ---
